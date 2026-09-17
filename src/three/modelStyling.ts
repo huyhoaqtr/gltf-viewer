@@ -39,7 +39,7 @@ export function applyMaterialStyle(root: THREE.Object3D, opts: MaterialStyleOpti
       if ((std as THREE.MeshStandardMaterial).isMeshStandardMaterial || (std as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial) {
         std.roughness = Math.max(std.roughness ?? 1, opts.roughnessFloor);
         if (opts.flattenMetal) std.metalness = Math.min(std.metalness ?? 0, 0.05);
-        std.envMapIntensity = 0.6;
+        std.envMapIntensity = 0.35;
       }
       m.side = opts.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
       m.needsUpdate = true;

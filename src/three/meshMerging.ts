@@ -400,6 +400,28 @@ export function mergeLineArtByMaterial(
         const IndexArray = vertexCount > 65535 ? Uint32Array : Uint16Array;
         geo.setIndex(new THREE.BufferAttribute(new IndexArray(vertexCount).map((_, i) => i), 1));
       }
+      if (kind === "line") {
+        // THREE.Line draws its index as one continuous LINE_STRIP: every
+        // consecutive pair connects, including the pair straddling the seam
+        // between two originally-*separate* line-strip objects once their
+        // indices are concatenated below. Left as a strip, that seam becomes
+        // a spurious segment from one sketch's last point straight to an
+        // unrelated sketch's first — exactly the "line floating across the
+        // whole model" artifact this avoids. Expanding to explicit
+        // consecutive-pair segments (LineSegments shape) up front means
+        // concatenation — and later masking a sub-range for hide/isolate,
+        // see setLineArtRangeVisible — can only ever affect real segments
+        // from the original strip, never a connection between two objects.
+        const src = geo.index!.array as ArrayLike<number>;
+        const pairCount = Math.max(0, src.length - 1);
+        const PairIndexArray = src.length > 65535 ? Uint32Array : Uint16Array;
+        const paired = new PairIndexArray(pairCount * 2);
+        for (let i = 0; i < pairCount; i++) {
+          paired[i * 2] = src[i];
+          paired[i * 2 + 1] = src[i + 1];
+        }
+        geo.setIndex(new THREE.BufferAttribute(paired, 1));
+      }
       return geo;
     });
     const merged = mergeGeometries(transformed, false);
@@ -413,10 +435,10 @@ export function mergeLineArtByMaterial(
     merged.computeBoundingSphere();
     merged.computeBoundingBox();
 
-    let combined: LineArtObject;
-    if (kind === "lineSegments") combined = new THREE.LineSegments(merged, material);
-    else if (kind === "line") combined = new THREE.Line(merged, material);
-    else combined = new THREE.Points(merged, material);
+    // "line" was already expanded to segment pairs above, so both non-point
+    // kinds share the same (safe-to-concatenate) LineSegments shape now.
+    const combined: LineArtObject =
+      kind === "points" ? new THREE.Points(merged, material) : new THREE.LineSegments(merged, material);
     combined.raycast = () => {};
     combined.frustumCulled = true;
     root.add(combined);
@@ -430,7 +452,10 @@ export function mergeLineArtByMaterial(
 
     let cursor = 0;
     objects.forEach((o) => {
-      const count = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count;
+      const rawCount = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count;
+      // Matches the pair-expansion above: a strip of rawCount vertices
+      // becomes (rawCount - 1) segments, i.e. twice as many indices.
+      const count = kind === "line" ? Math.max(0, rawCount - 1) * 2 : rawCount;
       const rangeIndex = lineArtBatch.ranges.length;
       lineArtBatch.ranges.push({ indexStart: cursor, indexCount: count });
 

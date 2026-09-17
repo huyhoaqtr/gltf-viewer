@@ -15,7 +15,7 @@ import { applyMaterialStyle, computeStats, disposeObject3D } from "./modelStylin
 import { mergeMeshesByMaterial, mergeLineArtByMaterial, findLineArtSiblings, type MergedBatch } from "./meshMerging";
 import { createSkyGradientTexture } from "./skyBackground";
 import { DRACO_DECODER_PATH } from "./constants";
-import { SKY_BACKGROUND_HEX, type CameraMode, type ModelStats, type UpAxis } from "../types/viewer";
+import { DEFAULT_SETTINGS, SKY_BACKGROUND_HEX, type CameraMode, type ModelStats, type UpAxis } from "../types/viewer";
 
 export interface ViewerEngineCallbacks {
   onStats: (stats: ModelStats | null) => void;
@@ -60,7 +60,7 @@ export class ViewerEngine {
   private sphere = new THREE.Sphere();
 
   private orientation: OrientationState = { ...DEFAULT_ORIENTATION };
-  private roughnessFloor = 0.75;
+  private roughnessFloor = 0.55;
   private flattenMetal = true;
   private doubleSided = true;
   private showEdgesEnabled = true;
@@ -83,7 +83,7 @@ export class ViewerEngine {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1;
+    this.renderer.toneMappingExposure = DEFAULT_SETTINGS.exposure;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     container.appendChild(this.renderer.domElement);
 
@@ -100,14 +100,21 @@ export class ViewerEngine {
     this.controls.maxDistance = 5000;
 
     // Soft environment lighting for gentle reflections (keeps materials from
-    // looking flat/dead).
+    // looking flat/dead). Kept low-intensity below (envMapIntensity on each
+    // material) — a generic light-colored room reflected too strongly washes
+    // every surface toward gray/white regardless of the material's own color.
     const pmrem = new THREE.PMREMGenerator(this.renderer);
-    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.2).texture;
 
     this.scene.add(this.pivot);
     applyOrientation(this.pivot, this.orientation);
 
-    this.sun = new THREE.DirectionalLight(0xffffff, 3);
+    // Neutral white sun + hemisphere — tinting either one shifts every
+    // material's hue, which is the wrong lever for washed-out color. What
+    // actually desaturates a pale material is too much flat ambient fill
+    // (hemi) pushing it up near the tone-mapping curve's white clip, so that
+    // knob is kept modest instead.
+    this.sun = new THREE.DirectionalLight(0xffffff, 2);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.00035;
@@ -115,7 +122,7 @@ export class ViewerEngine {
     this.scene.add(this.sun);
     this.scene.add(this.sun.target);
 
-    this.hemi = new THREE.HemisphereLight(0xf6f8fa, 0x4a4a4a, 1.2);
+    this.hemi = new THREE.HemisphereLight(0xb8d4e8, 0x4a4a4a, 0.9);
     this.scene.add(this.hemi);
 
     // Invisible shadow-catcher under the model so it reads as grounded

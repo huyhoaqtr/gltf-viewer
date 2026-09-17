@@ -30,11 +30,11 @@ export interface ViewerSettings {
 export const SKY_BACKGROUND_HEX = "#eef1f4";
 
 export const DEFAULT_SETTINGS: ViewerSettings = {
-  sunIntensity: 3,
-  skyIntensity: 1.2,
+  sunIntensity: 2,
+  skyIntensity: 0.9,
   exposure: 1,
-  sunAngle: 35,
-  roughnessFloor: 0.75,
+  sunAngle: 195,
+  roughnessFloor: 0.55,
   flattenMetal: true,
   doubleSided: true,
   upAxis: "z",
