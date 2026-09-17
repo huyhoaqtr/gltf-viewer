@@ -70,7 +70,12 @@ export function hardenFrustumCulling(root: THREE.Object3D) {
 export function disposeObject3D(root: THREE.Object3D) {
   root.traverse((obj) => {
     const mesh = obj as THREE.Mesh;
-    if (mesh.geometry) mesh.geometry.dispose();
+    if (mesh.geometry) {
+      // Frees the bounds tree's own typed arrays (see bvhSetup.ts /
+      // meshMerging.ts) — geometry.dispose() only releases GPU buffers, not this.
+      mesh.geometry.disposeBoundsTree?.();
+      mesh.geometry.dispose();
+    }
     if (mesh.material) {
       const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       mats.forEach((m) => {

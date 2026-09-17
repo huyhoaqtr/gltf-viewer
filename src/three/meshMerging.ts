@@ -173,6 +173,26 @@ export function mergeMeshesByMaterial(
     // batch is never accidentally exempted from it.
     merged.computeBoundingSphere();
     merged.computeBoundingBox();
+    // A merged batch can be a huge fraction of the whole model's triangles
+    // (BIM/CAD exports folded down to one draw call per material) — a plain
+    // per-triangle raycast (click-to-select, see ViewerEngine.handleModelClick)
+    // against that would scan millions of triangles on every click. Building
+    // a bounds tree here (see bvhSetup.ts for the global raycast patch that
+    // uses it) turns that into a fast tree descent instead.
+    //
+    // `indirect: true` is required: by default computeBoundsTree() reorders
+    // geometry.index in place for cache locality (three-mesh-bvh's own
+    // documented behavior) — but `parts[].indexStart/indexCount` (just below)
+    // and pristineIndex are fixed offsets into that *same* index array,
+    // assumed stable everywhere a part is looked up by index range
+    // (findPartAtFaceIndex, setPartVisible, extractPartGeometry,
+    // extractPartIndexed). A silent reorder scrambles every one of those —
+    // hide/isolate mask the wrong triangles, the wrong part gets
+    // selected/highlighted, and per-part edges get built from the wrong
+    // triangle range. Indirect mode keeps its own internal ordering instead
+    // of touching geometry.index, so raycasts still resolve to the correct
+    // original faceIndex.
+    merged.computeBoundsTree({ indirect: true });
 
     const parts: MergedPart[] = [];
     let cursor = 0;
@@ -291,6 +311,37 @@ export function extractPartGeometry(batch: MergedBatch, part: MergedPart): THREE
   const geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   return geo;
+}
+
+/**
+ * Extracts one part's triangles as a small, properly *indexed* geometry —
+ * unlike extractPartGeometry, which de-indexes into flat triangle soup (fine
+ * for a one-off selection outline, but throws away the shared-vertex
+ * information edge-detection needs). Vertices already sharing the same id in
+ * the batch's pristine index (i.e. genuinely coincident, not just
+ * numerically close) keep sharing a *local* id here — cheap to derive since
+ * that sharing is already known, unlike edgeExtraction's own quantization
+ * fallback, which has to rediscover it from raw coordinates. Feeding this
+ * into extractEdgeSegments (see edgeExtraction.ts) instead of a de-indexed
+ * array is what lets it use fast integer-keyed edge adjacency instead of
+ * hashing vertex coordinates.
+ */
+export function extractPartIndexed(batch: MergedBatch, part: MergedPart): { position: Float32Array; index: Uint32Array } {
+  const posAttr = batch.mesh.geometry.attributes.position as THREE.BufferAttribute;
+  const remap = new Map<number, number>();
+  const index = new Uint32Array(part.indexCount);
+  const positions: number[] = [];
+  for (let i = 0; i < part.indexCount; i++) {
+    const vi = batch.pristineIndex[part.indexStart + i];
+    let local = remap.get(vi);
+    if (local === undefined) {
+      local = remap.size;
+      remap.set(vi, local);
+      positions.push(posAttr.getX(vi), posAttr.getY(vi), posAttr.getZ(vi));
+    }
+    index[i] = local;
+  }
+  return { position: new Float32Array(positions), index };
 }
 
 /**

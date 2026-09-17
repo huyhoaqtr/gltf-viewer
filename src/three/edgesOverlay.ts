@@ -7,7 +7,8 @@ import {
   EDGE_WORKER_BATCH_VERTEX_COUNT,
   EDGE_WORKER_POOL_MAX,
 } from "./constants";
-import { extractPartGeometry, type MergedBatch, type EdgeRange } from "./meshMerging";
+import { extractPartIndexed, type MergedBatch, type EdgeRange } from "./meshMerging";
+import { extractEdgeSegments } from "./edgeExtraction";
 
 export interface EdgeOverlayLine extends THREE.LineSegments {
   userData: { isEdgeOverlay: true };
@@ -41,13 +42,13 @@ interface BatchAccumulator {
 }
 
 /**
- * Builds the passive "edges" overlay. EdgesGeometry is pure CPU math
- * (hashing/comparing triangle edges, no DOM or GPU access), so the work is
- * farmed out to a pool of Web Workers — real BIM/CAD exports can have tens
- * of thousands of small parts, and computing those in parallel across cores
- * is the only way to make that fast; time-slicing it on the main thread
- * (the fallback below) only trades wall-clock time for UI smoothness, it
- * doesn't reduce the total work.
+ * Builds the passive "edges" overlay. Hard-edge extraction (see
+ * edgeExtraction.ts) is pure CPU math (hashing/comparing triangle edges, no
+ * DOM or GPU access), so the work is farmed out to a pool of Web Workers —
+ * real BIM/CAD exports can have tens of thousands of small parts, and
+ * computing those in parallel across cores is the only way to make that
+ * fast; time-slicing it on the main thread (the fallback below) only trades
+ * wall-clock time for UI smoothness, it doesn't reduce the total work.
  *
  * For a merged draw batch (see meshMerging.ts), edges are computed *per
  * original part* (not once for the whole batch) and then combined into one
@@ -74,9 +75,9 @@ export class EdgesOverlayBuilder {
   private currentStartedAt = 0;
 
   /** Starts the worker pool early (e.g. right after the viewer mounts) so its
-   * one-time startup cost (each worker loading the three.js module) isn't
-   * paid on the critical path of the first edges build. Safe to call more
-   * than once — a no-op once the pool exists. */
+   * one-time startup cost (spinning up each worker's module) isn't paid on
+   * the critical path of the first edges build. Safe to call more than
+   * once — a no-op once the pool exists. */
   warmUp() {
     this.ensureWorkers();
   }
@@ -150,10 +151,12 @@ export class EdgesOverlayBuilder {
         position = target.mesh.geometry.attributes.position?.array as Float32Array | undefined;
         index = (target.mesh.geometry.index?.array as Uint16Array | Uint32Array | undefined) ?? null;
       } else {
-        // Already resolved through pristineIndex into a flat triangle-soup
-        // position array — no index needed, matching extractPartGeometry.
-        const partGeo = extractPartGeometry(target.batch, target.batch.parts[target.partIndex]);
-        position = partGeo.attributes.position.array as Float32Array;
+        // A small, properly *indexed* slice (see extractPartIndexed) — keeps
+        // shared vertices sharing an id, so the worker's edge extraction can
+        // use fast integer adjacency instead of re-hashing coordinates.
+        const extracted = extractPartIndexed(target.batch, target.batch.parts[target.partIndex]);
+        position = extracted.position;
+        index = extracted.index;
       }
       if (!position) return;
       idMap.set(id, target);
@@ -336,16 +339,15 @@ export class EdgesOverlayBuilder {
         const target = jobTargets[i++];
         try {
           if (target.kind === "mesh") {
-            const eg = new THREE.EdgesGeometry(target.mesh.geometry, EDGE_THRESHOLD_ANGLE);
-            const positions = eg.attributes.position.array as Float32Array;
-            eg.dispose();
+            const geo = target.mesh.geometry;
+            const position = geo.attributes.position?.array as Float32Array | undefined;
+            if (!position) throw new Error("mesh has no position attribute");
+            const index = (geo.index?.array as Uint16Array | Uint32Array | undefined) ?? null;
+            const positions = extractEdgeSegments(position, index, EDGE_THRESHOLD_ANGLE);
             this.attachMeshLine(target.mesh, positions);
           } else {
-            const partGeo = extractPartGeometry(target.batch, target.batch.parts[target.partIndex]);
-            const eg = new THREE.EdgesGeometry(partGeo, EDGE_THRESHOLD_ANGLE);
-            partGeo.dispose();
-            const positions = eg.attributes.position.array as Float32Array;
-            eg.dispose();
+            const extracted = extractPartIndexed(target.batch, target.batch.parts[target.partIndex]);
+            const positions = extractEdgeSegments(extracted.position, extracted.index, EDGE_THRESHOLD_ANGLE);
             this.receiveBatchPart(target.batch, target.partIndex, positions);
           }
         } catch {
