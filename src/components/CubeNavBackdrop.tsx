@@ -2,8 +2,8 @@ import { CUBE_NAV } from "../three/constants";
 
 /**
  * Purely decorative soft backdrop behind the cube navigator gizmo, which is
- * drawn by the engine directly into the WebGL canvas (not a DOM element).
- * Position/size come from the same constants the engine uses, so the two
+ * drawn by the R3F CubeGizmo directly into the WebGL canvas (not a DOM element).
+ * Position/size come from the same constants the gizmo uses, so the two
  * always line up.
  */
 export function CubeNavBackdrop() {

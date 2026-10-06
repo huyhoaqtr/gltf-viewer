@@ -25,7 +25,7 @@ export interface ViewerSettings {
   cameraMode: CameraMode;
 }
 
-// The default backdrop. ViewerEngine special-cases this exact value to
+// The default backdrop. the sky Background component special-cases this exact value to
 // render a soft neutral studio gradient instead of a flat fill.
 export const SKY_BACKGROUND_HEX = "#eef1f4";
 

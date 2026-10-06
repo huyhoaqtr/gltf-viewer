@@ -1,10 +1,8 @@
-import { useEngine } from "../../context/EngineContext";
 import { useViewerStore } from "../../state/viewerStore";
 import { CheckboxRow } from "./CheckboxRow";
 import type { UpAxis } from "../../types/viewer";
 
 export function OrientationSection() {
-  const engine = useEngine();
   const settings = useViewerStore((s) => s.settings);
   const updateSetting = useViewerStore((s) => s.updateSetting);
   const resetOrientationSettings = useViewerStore((s) => s.resetOrientationSettings);
@@ -20,7 +18,6 @@ export function OrientationSection() {
           onChange={(e) => {
             const v = e.target.value as UpAxis;
             updateSetting("upAxis", v);
-            engine?.setUpAxis(v);
           }}
         >
           <option value="y">Y — chuẩn glTF</option>
@@ -33,7 +30,6 @@ export function OrientationSection() {
         checked={settings.flipX}
         onChange={(v) => {
           updateSetting("flipX", v);
-          engine?.setFlipX(v);
         }}
       />
       <CheckboxRow
@@ -42,7 +38,6 @@ export function OrientationSection() {
         checked={settings.flipZ}
         onChange={(v) => {
           updateSetting("flipZ", v);
-          engine?.setFlipZ(v);
         }}
       />
       <CheckboxRow
@@ -51,7 +46,6 @@ export function OrientationSection() {
         checked={settings.spin180}
         onChange={(v) => {
           updateSetting("spin180", v);
-          engine?.setSpin180(v);
         }}
       />
       <button
@@ -59,7 +53,6 @@ export function OrientationSection() {
         style={{ alignSelf: "flex-start" }}
         onClick={() => {
           resetOrientationSettings();
-          engine?.resetOrientation();
         }}
       >
         Đặt lại hướng

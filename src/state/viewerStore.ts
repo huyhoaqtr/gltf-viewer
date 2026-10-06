@@ -2,8 +2,8 @@ import { create } from "zustand";
 import { DEFAULT_SETTINGS, type ModelStats, type ViewerSettings } from "../types/viewer";
 
 interface ViewerStore {
-  // Mirrors the engine's current settings so React inputs stay controlled.
-  // Components update this AND call the matching ViewerEngine setter.
+  // Single source of truth for viewer settings: the control panel writes
+  // here and the R3F scene components read from it.
   settings: ViewerSettings;
   updateSetting: <K extends keyof ViewerSettings>(key: K, value: ViewerSettings[K]) => void;
   resetOrientationSettings: () => void;
@@ -41,7 +41,13 @@ export const useViewerStore = create<ViewerStore>((set) => ({
   updateSetting: (key, value) => set((s) => ({ settings: { ...s.settings, [key]: value } })),
   resetOrientationSettings: () =>
     set((s) => ({
-      settings: { ...s.settings, upAxis: "y", flipX: false, flipZ: false, spin180: false },
+      settings: {
+        ...s.settings,
+        upAxis: DEFAULT_SETTINGS.upAxis,
+        flipX: DEFAULT_SETTINGS.flipX,
+        flipZ: DEFAULT_SETTINGS.flipZ,
+        spin180: DEFAULT_SETTINGS.spin180,
+      },
     })),
 
   panelOpen: true,

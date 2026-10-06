@@ -1,10 +1,9 @@
 import { useRef } from "react";
-import { useEngine } from "../context/EngineContext";
+import { viewerApi } from "../r3f/viewerApi";
 import { useViewerStore } from "../state/viewerStore";
 import { formatCount } from "../utils/format";
 
 export function TopBar() {
-  const engine = useEngine();
   const fileName = useViewerStore((s) => s.fileName);
   const stats = useViewerStore((s) => s.stats);
   const panelOpen = useViewerStore((s) => s.panelOpen);
@@ -32,7 +31,7 @@ export function TopBar() {
           Mở file .glb / .gltf
         </button>
         <span className="toolbar-divider" />
-        <button className="btn" disabled={!fileName} title="Zoom extents" onClick={() => engine?.fitToView()}>
+        <button className="btn" disabled={!fileName} title="Zoom extents" onClick={() => viewerApi.fitToView()}>
           Fit
         </button>
         <span className="toolbar-divider" />
@@ -47,7 +46,7 @@ export function TopBar() {
         style={{ display: "none" }}
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) engine?.loadFile(file);
+          if (file) viewerApi.loadFile(file);
           e.target.value = "";
         }}
       />

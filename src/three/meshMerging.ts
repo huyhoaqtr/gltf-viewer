@@ -175,7 +175,7 @@ export function mergeMeshesByMaterial(
     merged.computeBoundingBox();
     // A merged batch can be a huge fraction of the whole model's triangles
     // (BIM/CAD exports folded down to one draw call per material) — a plain
-    // per-triangle raycast (click-to-select, see ViewerEngine.handleModelClick)
+    // per-triangle raycast (click-to-select, see ModelController.handleModelClick)
     // against that would scan millions of triangles on every click. Building
     // a bounds tree here (see bvhSetup.ts for the global raycast patch that
     // uses it) turns that into a fast tree descent instead.

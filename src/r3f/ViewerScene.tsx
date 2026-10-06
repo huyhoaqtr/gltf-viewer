@@ -1,0 +1,397 @@
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useFrame, useStore, useThree } from "@react-three/fiber";
+import * as THREE from "three";
+import { OrbitControls } from "@react-three/drei";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+
+import { CubeNavigator } from "../three/cubeNavigator";
+import { ModelController, type FrameInfo } from "../three/ModelController";
+import { createSkyGradientTexture } from "../three/skyBackground";
+import { useViewerStore } from "../state/viewerStore";
+import { SKY_BACKGROUND_HEX } from "../types/viewer";
+import { registerViewerApi } from "./viewerApi";
+import { SceneRuntimeContext, useSceneRuntime, type SceneRuntime } from "./runtime";
+
+const INITIAL_FRAME: FrameInfo = { radius: 5, center: [0, 0, 0], minY: 0 };
+
+type ViewerCamera = THREE.PerspectiveCamera | THREE.OrthographicCamera;
+
+/** Everything rendered inside the <Canvas>. */
+export function ViewerScene() {
+  const rt = useRef<SceneRuntime>({ controls: null, controller: null, frame: INITIAL_FRAME, savedTarget: null }).current;
+  const [frame, setFrame] = useState<FrameInfo>(INITIAL_FRAME);
+
+  return (
+    <SceneRuntimeContext.Provider value={rt}>
+      <Background />
+      <Environment />
+      <Lights frame={frame} />
+      <Ground frame={frame} />
+      <Controls />
+      <CameraRig />
+      <ModelLayer
+        onFrame={(f) => {
+          rt.frame = f;
+          setFrame(f);
+        }}
+      />
+      <CubeGizmo />
+    </SceneRuntimeContext.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Environment / background / lights
+// ---------------------------------------------------------------------------
+
+function Background() {
+  const background = useViewerStore((s) => s.settings.background);
+  const sky = useMemo(() => createSkyGradientTexture(), []);
+  useEffect(() => () => sky.dispose(), [sky]);
+
+  return background === SKY_BACKGROUND_HEX ? (
+    <primitive object={sky} attach="background" />
+  ) : (
+    <color attach="background" args={[background]} />
+  );
+}
+
+/**
+ * Soft environment lighting for gentle reflections (keeps materials from
+ * looking flat/dead). Kept low-intensity (envMapIntensity on each material)
+ * — a generic light-colored room reflected too strongly washes every surface
+ * toward gray/white regardless of the material's own color.
+ */
+function Environment() {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+
+  useEffect(() => {
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const room = new RoomEnvironment();
+    const target = pmrem.fromScene(room, 0.2);
+    scene.environment = target.texture;
+    pmrem.dispose();
+    return () => {
+      scene.environment = null;
+      target.dispose();
+      room.dispose();
+    };
+  }, [gl, scene]);
+
+  return null;
+}
+
+/**
+ * Neutral white sun + hemisphere — tinting either one shifts every material's
+ * hue, which is the wrong lever for washed-out color. What actually
+ * desaturates a pale material is too much flat ambient fill (hemi) pushing it
+ * up near the tone-mapping curve's white clip, so that knob is kept modest.
+ */
+function Lights({ frame }: { frame: FrameInfo }) {
+  const gl = useThree((s) => s.gl);
+  const { sunIntensity, skyIntensity, sunAngle, showShadows, exposure } = useViewerStore((s) => s.settings);
+
+  useEffect(() => {
+    gl.toneMappingExposure = exposure;
+  }, [gl, exposure]);
+  useEffect(() => {
+    gl.shadowMap.enabled = showShadows;
+  }, [gl, showShadows]);
+
+  const r = frame.radius;
+  const angle = (sunAngle * Math.PI) / 180;
+  const dist = r * 2.2;
+
+  return (
+    <>
+      <directionalLight
+        color={0xffffff}
+        intensity={sunIntensity}
+        position={[Math.cos(angle) * dist, dist * 0.9, Math.sin(angle) * dist]}
+        castShadow={showShadows}
+        shadow-mapSize={[2048, 2048]}
+        shadow-bias={-0.00035}
+        shadow-normalBias={0.02}
+      >
+        <orthographicCamera attach="shadow-camera" args={[-r * 1.6, r * 1.6, r * 1.6, -r * 1.6, r * 0.1, r * 6]} />
+      </directionalLight>
+      <hemisphereLight args={[0xb8d4e8, 0x4a4a4a]} intensity={skyIntensity} />
+    </>
+  );
+}
+
+/** Invisible shadow-catcher under the model so it reads as grounded instead
+ * of floating, even when the glTF itself has no ground/floor. */
+function Ground({ frame }: { frame: FrameInfo }) {
+  const size = frame.radius * 10;
+  return (
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[frame.center[0], frame.minY, frame.center[2]]}
+      scale={[size, size, 1]}
+      receiveShadow
+    >
+      <planeGeometry args={[1, 1]} />
+      <shadowMaterial opacity={0.28} />
+    </mesh>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Camera + controls
+// ---------------------------------------------------------------------------
+
+function Controls() {
+  const rt = useSceneRuntime();
+  const [controls, setControls] = useState<OrbitControlsImpl | null>(null);
+
+  useEffect(() => {
+    rt.controls = controls;
+    // drei recreates the controls when the camera is swapped; carry the orbit
+    // target over so the view doesn't jump.
+    if (controls && rt.savedTarget) {
+      controls.target.copy(rt.savedTarget);
+      rt.savedTarget = null;
+      controls.update();
+    }
+    return () => {
+      rt.controls = null;
+    };
+  }, [controls, rt]);
+
+  useFrame(() => {
+    if (controls) controls.autoRotate = useViewerStore.getState().settings.autoRotate;
+  });
+
+  return (
+    <OrbitControls
+      ref={setControls}
+      makeDefault
+      enableDamping
+      dampingFactor={0.08}
+      screenSpacePanning
+      minDistance={0.01}
+      maxDistance={5000}
+      autoRotateSpeed={1.4}
+    />
+  );
+}
+
+/** Perspective ⇄ orthographic switching, plus keeping the projection in sync
+ * with the canvas size (the cameras are `manual`, so R3F leaves them alone —
+ * its own ortho resize math uses pixel units, which would break the framing). */
+function CameraRig() {
+  const rt = useSceneRuntime();
+  const mode = useViewerStore((s) => s.settings.cameraMode);
+  const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
+  const set = useThree((s) => s.set);
+
+  useLayoutEffect(() => {
+    const isOrtho = (camera as THREE.OrthographicCamera).isOrthographicCamera === true;
+    if (isOrtho === (mode === "ortho")) return;
+    const aspect = size.width / size.height;
+    let next: ViewerCamera;
+    if (mode === "ortho") {
+      const d = rt.controls?.target.distanceTo(camera.position) || rt.frame.radius * 2;
+      const h = d * 0.55;
+      next = new THREE.OrthographicCamera(-h * aspect, h * aspect, h, -h, -1000, 1000);
+    } else {
+      next = new THREE.PerspectiveCamera(45, aspect, 0.01, 5000);
+    }
+    if (rt.controls) rt.savedTarget = rt.controls.target.clone();
+    next.position.copy(camera.position);
+    next.quaternion.copy(camera.quaternion);
+    set({ camera: next });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  useLayoutEffect(() => {
+    (camera as ViewerCamera & { manual?: boolean }).manual = true;
+    const aspect = size.width / size.height;
+    if ((camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
+      (camera as THREE.PerspectiveCamera).aspect = aspect;
+    } else {
+      const cam = camera as THREE.OrthographicCamera;
+      const halfHeight = (cam.top - cam.bottom) / 2;
+      cam.left = -halfHeight * aspect;
+      cam.right = halfHeight * aspect;
+    }
+    camera.updateProjectionMatrix();
+    rt.controller?.onResize();
+  }, [camera, size, rt]);
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Model
+// ---------------------------------------------------------------------------
+
+function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
+  const rt = useSceneRuntime();
+  const store = useStore();
+  const gl = useThree((s) => s.gl);
+  const pivotRef = useRef<THREE.Group>(null);
+  const onFrameRef = useRef(onFrame);
+  onFrameRef.current = onFrame;
+
+  const { roughnessFloor, flattenMetal, doubleSided, showEdges, upAxis, flipX, flipZ, spin180 } = useViewerStore(
+    (s) => s.settings
+  );
+
+  useEffect(() => {
+    const s = () => useViewerStore.getState();
+    const controller = new ModelController(
+      {
+        pivot: pivotRef.current!,
+        getCamera: () => store.getState().camera as ViewerCamera,
+        getControls: () => rt.controls,
+        getSettings: () => s().settings,
+      },
+      {
+        onStats: (stats) => s().setStats(stats),
+        onLoadingProgress: (loading, text) => s().setLoading(loading, text),
+        onSelectionChange: (name) => s().setSelectedName(name),
+        onHiddenChange: (v) => s().setHasHidden(v),
+        onToast: (msg) => s().showToast(msg),
+        onFileName: (name) => {
+          s().setFileName(name);
+          s().setDropzoneVisible(!name);
+        },
+        onFrame: (f) => onFrameRef.current(f),
+      }
+    );
+    rt.controller = controller;
+    registerViewerApi({
+      loadFile: (file) => controller.loadFile(file),
+      fitToView: () => controller.fitToView(),
+      hideSelected: () => controller.hideSelected(),
+      isolateSelected: () => controller.isolateSelected(),
+      showAllObjects: () => controller.showAllObjects(),
+    });
+
+    // Click (not drag) on the model selects; "was this a click" is decided
+    // from the down/up distance so normal orbit-dragging is unaffected.
+    const dom = gl.domElement;
+    let down: { x: number; y: number } | null = null;
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button === 0) down = { x: e.clientX, y: e.clientY };
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (!down) return;
+      const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+      down = null;
+      if (moved <= 6) controller.handleModelClick(e.clientX, e.clientY, dom);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") controller.clearSelection();
+    };
+    dom.addEventListener("pointerdown", onPointerDown);
+    dom.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      dom.removeEventListener("pointerdown", onPointerDown);
+      dom.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("keydown", onKeyDown);
+      registerViewerApi(null);
+      controller.dispose();
+      rt.controller = null;
+    };
+  }, [gl, rt, store]);
+
+  // BIM/CAD axis/mirror fixes live on the pivot group, not the loaded scene.
+  useEffect(() => {
+    rt.controller?.setOrientation({ upAxis, flipX, flipZ, spin180 });
+  }, [rt, upAxis, flipX, flipZ, spin180]);
+
+  useEffect(() => {
+    rt.controller?.scheduleRestyle();
+  }, [rt, roughnessFloor, flattenMetal, doubleSided]);
+
+  useEffect(() => {
+    rt.controller?.setShowEdges(showEdges);
+  }, [rt, showEdges]);
+
+  return <group ref={pivotRef} />;
+}
+
+// ---------------------------------------------------------------------------
+// Cube navigator
+// ---------------------------------------------------------------------------
+
+/**
+ * Orientation gizmo drawn into a corner viewport of the main canvas after the
+ * main scene. Because this subscribes to the render loop with a positive
+ * priority, R3F stops auto-rendering — so the main scene is rendered here too.
+ */
+function CubeGizmo() {
+  const rt = useSceneRuntime();
+  const store = useStore();
+  const gl = useThree((s) => s.gl);
+  const cube = useMemo(() => new CubeNavigator(), []);
+  useEffect(() => () => cube.dispose(), [cube]);
+
+  useEffect(() => {
+    let cubePointerDown: { x: number; y: number } | null = null;
+
+    const snapView = (dirWorld: THREE.Vector3) => {
+      const controls = rt.controls;
+      if (!controls) return;
+      const camera = store.getState().camera;
+      const center = controls.target.clone();
+      const dist = Math.max(camera.position.distanceTo(center), rt.frame.radius * 2.2, 1);
+      const d = dirWorld.clone().normalize();
+      let up = new THREE.Vector3(0, 1, 0);
+      if (Math.abs(d.y) > 0.98) up = new THREE.Vector3(0, 0, d.y > 0 ? -1 : 1);
+      camera.up.copy(up);
+      camera.position.copy(center).addScaledVector(d, dist);
+      camera.lookAt(center);
+      controls.update();
+    };
+
+    // Intercepted in the CAPTURE phase on `window` (an ancestor of the
+    // canvas), which fires before OrbitControls' own listener on the canvas —
+    // stopping propagation keeps a click on the gizmo from starting a drag.
+    const onPointerDownCapture = (e: PointerEvent) => {
+      if (e.button === 0 && cube.isOver(e.clientX, e.clientY)) {
+        e.stopPropagation();
+        cubePointerDown = { x: e.clientX, y: e.clientY };
+      }
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (!cubePointerDown) return;
+      const moved = Math.hypot(e.clientX - cubePointerDown.x, e.clientY - cubePointerDown.y);
+      const pos = cubePointerDown;
+      cubePointerDown = null;
+      if (moved <= 6) {
+        const obj = cube.pick(pos.x, pos.y);
+        if (obj) snapView(obj.userData.dir);
+      }
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      cube.setHover(cube.pick(e.clientX, e.clientY));
+      gl.domElement.style.cursor = cube.isHovering ? "pointer" : "";
+    };
+
+    window.addEventListener("pointerdown", onPointerDownCapture, true);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointermove", onPointerMove);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDownCapture, true);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointermove", onPointerMove);
+    };
+  }, [cube, gl, rt, store]);
+
+  useFrame(({ gl, scene, camera }) => {
+    gl.render(scene, camera);
+    cube.syncToCamera(camera);
+    cube.render(gl);
+  }, 1);
+
+  return null;
+}

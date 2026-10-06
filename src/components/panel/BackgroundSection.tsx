@@ -1,9 +1,7 @@
-import { useEngine } from "../../context/EngineContext";
 import { useViewerStore } from "../../state/viewerStore";
 import { BACKGROUND_LABELS, BACKGROUND_SWATCHES } from "../../types/viewer";
 
 export function BackgroundSection() {
-  const engine = useEngine();
   const settings = useViewerStore((s) => s.settings);
   const updateSetting = useViewerStore((s) => s.updateSetting);
 
@@ -21,7 +19,6 @@ export function BackgroundSection() {
             title={BACKGROUND_LABELS[hex]}
             onClick={() => {
               updateSetting("background", hex);
-              engine?.setBackground(hex);
             }}
           />
         ))}

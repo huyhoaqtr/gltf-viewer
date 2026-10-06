@@ -10,7 +10,7 @@ import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from "three-
  * cost) transparently falls back to the exact same brute-force path as
  * before, so this is safe to apply everywhere rather than gated per-mesh.
  *
- * Click-to-select (see ViewerEngine.handleModelClick) is the only per-model
+ * Click-to-select (see ModelController.handleModelClick) is the only per-model
  * raycast in this app, but on a large CAD/BIM import — tens of thousands of
  * parts folded into a handful of merged-by-material batches (see
  * meshMerging.ts), each still tens of millions of triangles — a brute-force

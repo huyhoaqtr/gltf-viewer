@@ -1,8 +1,7 @@
-import { useEngine } from "../../context/EngineContext";
+import { viewerApi } from "../../r3f/viewerApi";
 import { useViewerStore } from "../../state/viewerStore";
 
 export function SelectionSection() {
-  const engine = useEngine();
   const selectedName = useViewerStore((s) => s.selectedName);
   const hasHidden = useViewerStore((s) => s.hasHidden);
 
@@ -11,13 +10,13 @@ export function SelectionSection() {
       <h3>Đối tượng đã chọn</h3>
       <span className="selection-name">{selectedName ?? "Chưa chọn gì"}</span>
       <div className="btn-row">
-        <button className="btn" disabled={!selectedName} onClick={() => engine?.hideSelected()}>
+        <button className="btn" disabled={!selectedName} onClick={() => viewerApi.hideSelected()}>
           Ẩn
         </button>
-        <button className="btn" disabled={!selectedName} onClick={() => engine?.isolateSelected()}>
+        <button className="btn" disabled={!selectedName} onClick={() => viewerApi.isolateSelected()}>
           Cô lập
         </button>
-        <button className="btn" disabled={!hasHidden} onClick={() => engine?.showAllObjects()}>
+        <button className="btn" disabled={!hasHidden} onClick={() => viewerApi.showAllObjects()}>
           Hiện tất cả
         </button>
       </div>

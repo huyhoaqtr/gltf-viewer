@@ -1,9 +1,7 @@
-import { useEngine } from "../../context/EngineContext";
 import { useViewerStore } from "../../state/viewerStore";
 import { CheckboxRow } from "./CheckboxRow";
 
 export function DisplaySection() {
-  const engine = useEngine();
   const settings = useViewerStore((s) => s.settings);
   const updateSetting = useViewerStore((s) => s.updateSetting);
 
@@ -16,7 +14,6 @@ export function DisplaySection() {
         checked={settings.showEdges}
         onChange={(v) => {
           updateSetting("showEdges", v);
-          engine?.setShowEdges(v);
         }}
       />
       <CheckboxRow
@@ -25,7 +22,6 @@ export function DisplaySection() {
         checked={settings.showShadows}
         onChange={(v) => {
           updateSetting("showShadows", v);
-          engine?.setShowShadows(v);
         }}
       />
       <CheckboxRow
@@ -34,7 +30,6 @@ export function DisplaySection() {
         checked={settings.autoRotate}
         onChange={(v) => {
           updateSetting("autoRotate", v);
-          engine?.setAutoRotate(v);
         }}
       />
     </div>

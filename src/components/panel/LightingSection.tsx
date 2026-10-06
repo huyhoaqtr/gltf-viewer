@@ -1,9 +1,7 @@
-import { useEngine } from "../../context/EngineContext";
 import { useViewerStore } from "../../state/viewerStore";
 import { Slider } from "./Slider";
 
 export function LightingSection() {
-  const engine = useEngine();
   const settings = useViewerStore((s) => s.settings);
   const updateSetting = useViewerStore((s) => s.updateSetting);
 
@@ -20,7 +18,6 @@ export function LightingSection() {
         format={(v) => v.toFixed(1)}
         onChange={(v) => {
           updateSetting("sunIntensity", v);
-          engine?.setSunIntensity(v);
         }}
       />
       <Slider
@@ -33,7 +30,6 @@ export function LightingSection() {
         format={(v) => v.toFixed(1)}
         onChange={(v) => {
           updateSetting("skyIntensity", v);
-          engine?.setSkyIntensity(v);
         }}
       />
       <Slider
@@ -46,7 +42,6 @@ export function LightingSection() {
         format={(v) => v.toFixed(2)}
         onChange={(v) => {
           updateSetting("exposure", v);
-          engine?.setExposure(v);
         }}
       />
       <Slider
@@ -59,7 +54,6 @@ export function LightingSection() {
         format={(v) => `${Math.round(v)}°`}
         onChange={(v) => {
           updateSetting("sunAngle", v);
-          engine?.setSunAngle(v);
         }}
       />
     </div>

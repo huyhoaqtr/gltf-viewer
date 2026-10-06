@@ -144,6 +144,16 @@ export class CubeNavigator {
     this.camera.updateMatrixWorld();
   }
 
+  dispose() {
+    this.group.traverse((obj) => {
+      const mesh = obj as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>;
+      if (!mesh.isMesh) return;
+      mesh.geometry.dispose();
+      mesh.material.map?.dispose();
+      mesh.material.dispose();
+    });
+  }
+
   /** Render into a small scissored viewport in the corner of the same canvas. */
   render(renderer: THREE.WebGLRenderer) {
     const vpY = window.innerHeight - CUBE_NAV.marginTop - CUBE_NAV.size;
@@ -151,7 +161,11 @@ export class CubeNavigator {
     renderer.setViewport(CUBE_NAV.marginX, vpY, CUBE_NAV.size, CUBE_NAV.size);
     renderer.setScissor(CUBE_NAV.marginX, vpY, CUBE_NAV.size, CUBE_NAV.size);
     renderer.clearDepth();
+    // Keep the main image behind the gizmo instead of wiping the corner.
+    const autoClearColor = renderer.autoClearColor;
+    renderer.autoClearColor = false;
     renderer.render(this.scene, this.camera);
+    renderer.autoClearColor = autoClearColor;
     renderer.setScissorTest(false);
     renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
   }

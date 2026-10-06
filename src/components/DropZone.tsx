@@ -1,15 +1,14 @@
 import { useRef } from "react";
-import { useEngine } from "../context/EngineContext";
+import { viewerApi } from "../r3f/viewerApi";
 import { useViewerStore } from "../state/viewerStore";
 import { useWindowFileDrop } from "../hooks/useWindowFileDrop";
 
 export function DropZone() {
-  const engine = useEngine();
   const visible = useViewerStore((s) => s.dropzoneVisible);
   const dragOver = useViewerStore((s) => s.dragOver);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useWindowFileDrop((file) => engine?.loadFile(file));
+  useWindowFileDrop((file) => viewerApi.loadFile(file));
 
   const classes = ["", !visible ? "hidden" : "", dragOver ? "dragover" : ""].filter(Boolean).join(" ");
 
@@ -36,7 +35,7 @@ export function DropZone() {
         style={{ display: "none" }}
         onChange={(e) => {
           const file = e.target.files?.[0];
-          if (file) engine?.loadFile(file);
+          if (file) viewerApi.loadFile(file);
           e.target.value = "";
         }}
       />

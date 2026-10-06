@@ -1,10 +1,8 @@
-import { useEngine } from "../../context/EngineContext";
 import { useViewerStore } from "../../state/viewerStore";
 import { Slider } from "./Slider";
 import { CheckboxRow } from "./CheckboxRow";
 
 export function MaterialSection() {
-  const engine = useEngine();
   const settings = useViewerStore((s) => s.settings);
   const updateSetting = useViewerStore((s) => s.updateSetting);
 
@@ -21,7 +19,6 @@ export function MaterialSection() {
         format={(v) => v.toFixed(2)}
         onChange={(v) => {
           updateSetting("roughnessFloor", v);
-          engine?.setRoughnessFloor(v);
         }}
       />
       <CheckboxRow
@@ -30,7 +27,6 @@ export function MaterialSection() {
         checked={settings.flattenMetal}
         onChange={(v) => {
           updateSetting("flattenMetal", v);
-          engine?.setFlattenMetal(v);
         }}
       />
       <CheckboxRow
@@ -39,7 +35,6 @@ export function MaterialSection() {
         checked={settings.doubleSided}
         onChange={(v) => {
           updateSetting("doubleSided", v);
-          engine?.setDoubleSided(v);
         }}
       />
     </div>
