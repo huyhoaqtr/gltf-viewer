@@ -1,5 +1,20 @@
 import { create } from "zustand";
-import { DEFAULT_SETTINGS, type ModelStats, type ViewerSettings } from "../types/viewer";
+import { HOLOGRAM_EDGES_MAX_TRIANGLES } from "../three/constants";
+import {
+  DEFAULT_HOLOGRAM_SETTINGS,
+  DEFAULT_SETTINGS,
+  type HologramSettings,
+  type ModelStats,
+  type ViewMode,
+  type ViewerSettings,
+} from "../types/viewer";
+
+/** Whether the edges overlay should be shown right now, for the active view mode. */
+export function selectEdgesEnabled(s: Pick<ViewerStore, "viewMode" | "settings" | "hologramSettings" | "stats">): boolean {
+  if (s.viewMode !== "hologram") return s.settings.showEdges;
+  const tooHeavy = !!s.stats && s.stats.triangleCount > HOLOGRAM_EDGES_MAX_TRIANGLES;
+  return s.hologramSettings.showEdges && !tooHeavy;
+}
 
 interface ViewerStore {
   // Single source of truth for viewer settings: the control panel writes
@@ -7,6 +22,12 @@ interface ViewerStore {
   settings: ViewerSettings;
   updateSetting: <K extends keyof ViewerSettings>(key: K, value: ViewerSettings[K]) => void;
   resetOrientationSettings: () => void;
+
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
+  toggleHologram: () => void;
+  hologramSettings: HologramSettings;
+  updateHologramSetting: <K extends keyof HologramSettings>(key: K, value: HologramSettings[K]) => void;
 
   panelOpen: boolean;
   togglePanel: () => void;
@@ -49,6 +70,12 @@ export const useViewerStore = create<ViewerStore>((set) => ({
         spin180: DEFAULT_SETTINGS.spin180,
       },
     })),
+
+  viewMode: "standard",
+  setViewMode: (viewMode) => set({ viewMode }),
+  toggleHologram: () => set((s) => ({ viewMode: s.viewMode === "hologram" ? "standard" : "hologram" })),
+  hologramSettings: { ...DEFAULT_HOLOGRAM_SETTINGS },
+  updateHologramSetting: (key, value) => set((s) => ({ hologramSettings: { ...s.hologramSettings, [key]: value } })),
 
   panelOpen: true,
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),

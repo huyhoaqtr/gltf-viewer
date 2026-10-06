@@ -17,3 +17,6 @@ export const CUBE_NAV = {
   marginTop: 68,
   size: 108,
 } as const;
+
+/** Hologram mode skips the edges overlay on models heavier than this. */
+export const HOLOGRAM_EDGES_MAX_TRIANGLES = 6_000_000;

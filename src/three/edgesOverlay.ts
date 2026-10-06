@@ -10,6 +10,13 @@ import {
 import { extractPartIndexed, type MergedBatch, type EdgeRange } from "./meshMerging";
 import { extractEdgeSegments } from "./edgeExtraction";
 
+/** Temporary look for the edges (e.g. hologram mode); `null` restores the default. */
+export interface EdgeStyle {
+  color: THREE.Color;
+  opacity: number;
+  blending: THREE.Blending;
+}
+
 export interface EdgeOverlayLine extends THREE.LineSegments {
   userData: { isEdgeOverlay: true };
 }
@@ -63,6 +70,7 @@ export class EdgesOverlayBuilder {
 
   private token = 0;
   private material: THREE.LineBasicMaterial | null = null;
+  private styleOverride: EdgeStyle | null = null;
   private workers: Worker[] = [];
 
   // Mutable state for whichever build is currently "current" (this.token).
@@ -80,6 +88,21 @@ export class EdgesOverlayBuilder {
    * once — a no-op once the pool exists. */
   warmUp() {
     this.ensureWorkers();
+  }
+
+  /** Applies (or, with null, removes) a style override; also used by future rebuilds. */
+  setStyleOverride(style: EdgeStyle | null) {
+    this.styleOverride = style;
+    this.applyStyle();
+  }
+
+  private applyStyle() {
+    const m = this.material;
+    if (!m) return;
+    const s = this.styleOverride;
+    m.color.set(s ? s.color : EDGE_COLOR);
+    m.opacity = s ? s.opacity : 0.55;
+    m.blending = s ? s.blending : THREE.NormalBlending;
   }
 
   /** Cancels any build currently in progress without disposing state. */
@@ -105,7 +128,8 @@ export class EdgesOverlayBuilder {
     this.lines = [];
     this.built = false;
     this.material?.dispose();
-    this.material = new THREE.LineBasicMaterial({ color: EDGE_COLOR, transparent: true, opacity: 0.55 });
+    this.material = new THREE.LineBasicMaterial({ transparent: true });
+    this.applyStyle();
     this.currentStartedAt = performance.now();
     this.currentOnProgress = onProgress;
     this.currentBatchAccum.clear();
@@ -117,6 +141,7 @@ export class EdgesOverlayBuilder {
       // LineSegments2 (the selection outline) is implemented as a THREE.Mesh
       // subclass, so `isMesh` is true for it too — exclude it explicitly.
       if (!mesh.isMesh || !mesh.geometry || mesh.isLineSegments2) return;
+      if (mesh.userData.isHologramPrepass) return; // depth-only twin of a real mesh
 
       const batch = mesh.userData.mergedBatch as MergedBatch | undefined;
       if (batch) {

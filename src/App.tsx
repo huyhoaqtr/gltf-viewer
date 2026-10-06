@@ -5,9 +5,11 @@ import { ControlPanel } from "./components/panel/ControlPanel";
 import { DropZone } from "./components/DropZone";
 import { LoadingOverlay } from "./components/LoadingOverlay";
 import { ToastBanner } from "./components/ToastBanner";
+import { useHologramHotkey } from "./hooks/useHologramHotkey";
 import { Hint } from "./components/Hint";
 
 export default function App() {
+  useHologramHotkey();
   return (
     <>
       <Viewport />

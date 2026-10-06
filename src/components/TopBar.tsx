@@ -8,6 +8,8 @@ export function TopBar() {
   const stats = useViewerStore((s) => s.stats);
   const panelOpen = useViewerStore((s) => s.panelOpen);
   const togglePanel = useViewerStore((s) => s.togglePanel);
+  const viewMode = useViewerStore((s) => s.viewMode);
+  const toggleHologram = useViewerStore((s) => s.toggleHologram);
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -33,6 +35,15 @@ export function TopBar() {
         <span className="toolbar-divider" />
         <button className="btn" disabled={!fileName} title="Zoom extents" onClick={() => viewerApi.fitToView()}>
           Fit
+        </button>
+        <span className="toolbar-divider" />
+        <button
+          className="btn toggle"
+          aria-pressed={viewMode === "hologram"}
+          title="Chế độ Hologram (H)"
+          onClick={toggleHologram}
+        >
+          Hologram
         </button>
         <span className="toolbar-divider" />
         <button className="btn toggle" aria-pressed={panelOpen} title="Bảng điều khiển" onClick={togglePanel}>

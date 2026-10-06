@@ -9,6 +9,8 @@ export interface SceneRuntime {
   controller: ModelController | null;
   frame: FrameInfo;
   /** Orbit target stashed across a camera swap (see Controls). */
+  /** Draw calls / triangles of the main scene pass only (the gizmo pass would overwrite gl.info). */
+  mainRender: { calls: number; triangles: number };
   savedTarget: THREE.Vector3 | null;
 }
 

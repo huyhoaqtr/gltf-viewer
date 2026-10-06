@@ -35,6 +35,9 @@ export function applyMaterialStyle(root: THREE.Object3D, opts: MaterialStyleOpti
     mesh.receiveShadow = true;
     const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
     mats.forEach((m) => {
+      // The shared hologram material (see materials/HologramMaterial.ts) must
+      // not be restyled; the originals are restyled again on restore.
+      if (m.userData.isHologram) return;
       const std = m as THREE.MeshStandardMaterial;
       if ((std as THREE.MeshStandardMaterial).isMeshStandardMaterial || (std as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial) {
         std.roughness = Math.max(std.roughness ?? 1, opts.roughnessFloor);

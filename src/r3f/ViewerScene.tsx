@@ -7,9 +7,12 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 
 import { CubeNavigator } from "../three/cubeNavigator";
 import { ModelController, type FrameInfo } from "../three/ModelController";
-import { createSkyGradientTexture } from "../three/skyBackground";
-import { useViewerStore } from "../state/viewerStore";
+import { createGradientTexture, createSkyGradientTexture } from "../three/skyBackground";
+import { selectEdgesEnabled, useViewerStore } from "../state/viewerStore";
 import { SKY_BACKGROUND_HEX } from "../types/viewer";
+import { HologramEffects } from "./hologram/HologramEffects";
+import { HOLOGRAM_COLORS } from "./hologram/palette";
+import { useHologramMode } from "./hologram/useHologramMode";
 import { registerViewerApi } from "./viewerApi";
 import { SceneRuntimeContext, useSceneRuntime, type SceneRuntime } from "./runtime";
 
@@ -19,7 +22,7 @@ type ViewerCamera = THREE.PerspectiveCamera | THREE.OrthographicCamera;
 
 /** Everything rendered inside the <Canvas>. */
 export function ViewerScene() {
-  const rt = useRef<SceneRuntime>({ controls: null, controller: null, frame: INITIAL_FRAME, savedTarget: null }).current;
+  const rt = useRef<SceneRuntime>({ controls: null, controller: null, frame: INITIAL_FRAME, savedTarget: null, mainRender: { calls: 0, triangles: 0 } }).current;
   const [frame, setFrame] = useState<FrameInfo>(INITIAL_FRAME);
 
   return (
@@ -36,6 +39,9 @@ export function ViewerScene() {
           setFrame(f);
         }}
       />
+      <HologramMode />
+      <HologramLayer frame={frame} />
+      {import.meta.env.DEV && <DebugHandle />}
       <CubeGizmo />
     </SceneRuntimeContext.Provider>
   );
@@ -47,9 +53,20 @@ export function ViewerScene() {
 
 function Background() {
   const background = useViewerStore((s) => s.settings.background);
+  const hologram = useViewerStore((s) => s.viewMode === "hologram");
   const sky = useMemo(() => createSkyGradientTexture(), []);
+  const holoSky = useMemo(
+    () =>
+      createGradientTexture([
+        [0, HOLOGRAM_COLORS.backgroundTop],
+        [1, HOLOGRAM_COLORS.backgroundBottom],
+      ]),
+    []
+  );
   useEffect(() => () => sky.dispose(), [sky]);
+  useEffect(() => () => holoSky.dispose(), [holoSky]);
 
+  if (hologram) return <primitive object={holoSky} attach="background" />;
   return background === SKY_BACKGROUND_HEX ? (
     <primitive object={sky} attach="background" />
   ) : (
@@ -66,19 +83,27 @@ function Background() {
 function Environment() {
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
+  const hologram = useViewerStore((s) => s.viewMode === "hologram");
+  const target = useRef<THREE.WebGLRenderTarget | null>(null);
 
   useEffect(() => {
     const pmrem = new THREE.PMREMGenerator(gl);
     const room = new RoomEnvironment();
-    const target = pmrem.fromScene(room, 0.2);
-    scene.environment = target.texture;
+    const rt = pmrem.fromScene(room, 0.2);
+    target.current = rt;
     pmrem.dispose();
     return () => {
       scene.environment = null;
-      target.dispose();
+      target.current = null;
+      rt.dispose();
       room.dispose();
     };
   }, [gl, scene]);
+
+  // Hologram is self-lit: drop the reflections, then restore the same map.
+  useEffect(() => {
+    scene.environment = hologram ? null : target.current?.texture ?? null;
+  }, [scene, hologram]);
 
   return null;
 }
@@ -91,7 +116,11 @@ function Environment() {
  */
 function Lights({ frame }: { frame: FrameInfo }) {
   const gl = useThree((s) => s.gl);
-  const { sunIntensity, skyIntensity, sunAngle, showShadows, exposure } = useViewerStore((s) => s.settings);
+  const settings = useViewerStore((s) => s.settings);
+  const hologram = useViewerStore((s) => s.viewMode === "hologram");
+  const { sunIntensity, skyIntensity, sunAngle, exposure } = settings;
+  // Hologram is self-lit: no sun/hemisphere and no shadow pass (the model is additive and unlit).
+  const showShadows = settings.showShadows && !hologram;
 
   useEffect(() => {
     gl.toneMappingExposure = exposure;
@@ -108,7 +137,7 @@ function Lights({ frame }: { frame: FrameInfo }) {
     <>
       <directionalLight
         color={0xffffff}
-        intensity={sunIntensity}
+        intensity={hologram ? 0 : sunIntensity}
         position={[Math.cos(angle) * dist, dist * 0.9, Math.sin(angle) * dist]}
         castShadow={showShadows}
         shadow-mapSize={[2048, 2048]}
@@ -117,7 +146,7 @@ function Lights({ frame }: { frame: FrameInfo }) {
       >
         <orthographicCamera attach="shadow-camera" args={[-r * 1.6, r * 1.6, r * 1.6, -r * 1.6, r * 0.1, r * 6]} />
       </directionalLight>
-      <hemisphereLight args={[0xb8d4e8, 0x4a4a4a]} intensity={skyIntensity} />
+      <hemisphereLight args={[0xb8d4e8, 0x4a4a4a]} intensity={hologram ? 0 : skyIntensity} />
     </>
   );
 }
@@ -125,6 +154,8 @@ function Lights({ frame }: { frame: FrameInfo }) {
 /** Invisible shadow-catcher under the model so it reads as grounded instead
  * of floating, even when the glTF itself has no ground/floor. */
 function Ground({ frame }: { frame: FrameInfo }) {
+  const hologram = useViewerStore((s) => s.viewMode === "hologram");
+  if (hologram) return null;
   const size = frame.radius * 10;
   return (
     <mesh
@@ -238,9 +269,10 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
   const onFrameRef = useRef(onFrame);
   onFrameRef.current = onFrame;
 
-  const { roughnessFloor, flattenMetal, doubleSided, showEdges, upAxis, flipX, flipZ, spin180 } = useViewerStore(
+  const { roughnessFloor, flattenMetal, doubleSided, upAxis, flipX, flipZ, spin180 } = useViewerStore(
     (s) => s.settings
   );
+  const edgesEnabled = useViewerStore(selectEdgesEnabled);
 
   useEffect(() => {
     const s = () => useViewerStore.getState();
@@ -250,6 +282,7 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
         getCamera: () => store.getState().camera as ViewerCamera,
         getControls: () => rt.controls,
         getSettings: () => s().settings,
+        getEdgesEnabled: () => selectEdgesEnabled(s()),
       },
       {
         onStats: (stats) => s().setStats(stats),
@@ -313,10 +346,41 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
   }, [rt, roughnessFloor, flattenMetal, doubleSided]);
 
   useEffect(() => {
-    rt.controller?.setShowEdges(showEdges);
-  }, [rt, showEdges]);
+    rt.controller?.setShowEdges(edgesEnabled);
+  }, [rt, edgesEnabled]);
 
   return <group ref={pivotRef} />;
+}
+
+/** Fog, grid and post-processing: mounted only while in hologram mode. */
+function HologramLayer({ frame }: { frame: FrameInfo }) {
+  const hologram = useViewerStore((s) => s.viewMode === "hologram");
+  return hologram ? <HologramEffects frame={frame} /> : null;
+}
+
+/** Dev only: exposes `window.__viewer = { gl, scene, info() }` for console measurements. */
+function DebugHandle() {
+  const rt = useSceneRuntime();
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  useEffect(() => {
+    const w = window as unknown as { __viewer?: unknown };
+    w.__viewer = {
+      gl,
+      scene,
+      info: () => ({ memory: { ...gl.info.memory }, render: { ...rt.mainRender } }),
+    };
+    return () => {
+      delete w.__viewer;
+    };
+  }, [gl, scene, rt]);
+  return null;
+}
+
+/** Mounted after ModelLayer so the controller exists when its effects run. */
+function HologramMode() {
+  useHologramMode();
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -387,11 +451,34 @@ function CubeGizmo() {
     };
   }, [cube, gl, rt, store]);
 
+  // gl.info resets on every render() call; reset manually so the main pass's
+  // numbers can be captured before the gizmo pass adds its own.
+  useEffect(() => {
+    gl.info.autoReset = false;
+    return () => {
+      gl.info.autoReset = true;
+    };
+  }, [gl]);
+  useFrame(({ gl }) => gl.info.reset(), 0.5);
+
+  // Standard mode: this renders the main scene (a positive priority disables
+  // R3F's auto render). In hologram mode the EffectComposer renders it instead.
   useFrame(({ gl, scene, camera }) => {
+    if (useViewerStore.getState().viewMode === "hologram") return;
+    // The EffectComposer turns autoClear off and doesn't restore it on unmount.
+    // With a texture background three.js only clears color/depth when autoClear
+    // is on, so a stale depth buffer would punch holes in the model while orbiting.
+    gl.autoClear = true;
     gl.render(scene, camera);
+  }, 1);
+
+  // Always last, drawn onto whatever the main pass produced.
+  useFrame(({ gl, camera }) => {
+    rt.mainRender.calls = gl.info.render.calls;
+    rt.mainRender.triangles = gl.info.render.triangles;
     cube.syncToCamera(camera);
     cube.render(gl);
-  }, 1);
+  }, 2);
 
   return null;
 }

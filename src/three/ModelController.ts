@@ -5,7 +5,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 
-import { EdgesOverlayBuilder } from "./edgesOverlay";
+import { EdgesOverlayBuilder, type EdgeStyle } from "./edgesOverlay";
 import { ModelBuilder } from "./modelBuilder";
 import { SelectionController } from "./selection";
 import { applyOrientation, type OrientationState } from "./orientation";
@@ -31,11 +31,21 @@ export interface FrameInfo {
   minY: number;
 }
 
+/** Lets a display mode (e.g. hologram) react to the model's lifecycle. */
+export interface ModelHooks {
+  /** Model finished loading and merging — all final meshes now exist. */
+  afterMerge?: (root: THREE.Object3D) => void;
+  /** Model is about to be disposed — undo anything that must not be disposed with it. */
+  beforeClear?: (root: THREE.Object3D) => void;
+}
+
 export interface ModelControllerDeps {
   pivot: THREE.Group;
   getCamera: () => THREE.PerspectiveCamera | THREE.OrthographicCamera;
   getControls: () => OrbitControls | null;
   getSettings: () => ViewerSettings;
+  /** Edges overlay on/off for the active view mode (see selectEdgesEnabled). */
+  getEdgesEnabled: () => boolean;
 }
 
 /**
@@ -57,6 +67,8 @@ export class ModelController {
   private box = new THREE.Box3();
   private sphere = new THREE.Sphere();
 
+  private hooks: ModelHooks = {};
+  private ready = false;
   private restyleScheduled = false;
   private disposed = false;
 
@@ -97,6 +109,15 @@ export class ModelController {
     this.disposed = true;
     this.clearModel();
     this.edgesBuilder.destroyWorkers();
+  }
+
+  setHooks(hooks: ModelHooks | null) {
+    this.hooks = hooks ?? {};
+  }
+
+  /** The model root once it is fully loaded and merged; null while streaming in or empty. */
+  getReadyRoot(): THREE.Object3D | null {
+    return this.ready ? this.currentRoot : null;
   }
 
   /** Re-apply the selection outline's screen resolution after a canvas resize. */
@@ -170,10 +191,12 @@ export class ModelController {
             this.selection.setMergedBatches(this.mergedBatches);
             mergeLineArtByMaterial(root, lineArtToMesh, meshToPart);
             this.frameModel();
-            if (this.deps.getSettings().showEdges) {
+            if (this.deps.getEdgesEnabled()) {
               this.scheduleEdgesBuild(root);
             }
             this.updateEdgeVisibility();
+            this.ready = true;
+            this.hooks.afterMerge?.(root);
           }
         );
       },
@@ -196,7 +219,9 @@ export class ModelController {
     this.selection.reset();
     this.edgesBuilder.cancel();
     this.modelBuilder.cancel();
+    this.ready = false;
     if (this.currentRoot) {
+      this.hooks.beforeClear?.(this.currentRoot);
       this.deps.pivot.remove(this.currentRoot);
       disposeObject3D(this.currentRoot);
       this.currentRoot = null;
@@ -208,7 +233,7 @@ export class ModelController {
 
   private updateEdgeVisibility() {
     this.edgesBuilder.lines.forEach((line) => {
-      line.visible = this.deps.getSettings().showEdges && !!line.parent && line.parent.visible;
+      line.visible = this.deps.getEdgesEnabled() && !!line.parent && line.parent.visible;
     });
   }
 
@@ -222,7 +247,7 @@ export class ModelController {
   // setTimeout on browsers without it (Safari).
   private scheduleEdgesBuild(root: THREE.Object3D) {
     const start = () => {
-      if (this.currentRoot !== root || !this.deps.getSettings().showEdges) return; // model changed or toggled off meanwhile
+      if (this.currentRoot !== root || !this.deps.getEdgesEnabled()) return; // model changed or toggled off meanwhile
       this.edgesBuilder.build(root, () => this.updateEdgeVisibility());
     };
     if (typeof requestIdleCallback === "function") {
@@ -285,6 +310,10 @@ export class ModelController {
   setOrientation(state: OrientationState) {
     applyOrientation(this.deps.pivot, state);
     this.frameModel();
+  }
+
+  setEdgeStyle(style: EdgeStyle | null) {
+    this.edgesBuilder.setStyleOverride(style);
   }
 
   setShowEdges(v: boolean) {

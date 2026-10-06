@@ -1,5 +1,6 @@
 export type UpAxis = "y" | "z";
 export type CameraMode = "persp" | "ortho";
+export type ViewMode = "standard" | "hologram";
 
 export interface ModelStats {
   meshCount: number;
@@ -24,6 +25,32 @@ export interface ViewerSettings {
   background: string;
   cameraMode: CameraMode;
 }
+
+export interface HologramSettings {
+  color: string;
+  rimPower: number;
+  opacity: number;
+  /** Scanlines per model height (scaled by the model's size, not world units). */
+  scanlineDensity: number;
+  scanlineSpeed: number;
+  flickerIntensity: number;
+  showEdges: boolean;
+  bloomIntensity: number;
+  /** Depth-only pre-pass so only the nearest surface glows (off = see-through X-ray look). */
+  depthPrepass: boolean;
+}
+
+export const DEFAULT_HOLOGRAM_SETTINGS: HologramSettings = {
+  color: "#00E5FF",
+  rimPower: 2.5,
+  opacity: 0.3,
+  scanlineDensity: 40,
+  scanlineSpeed: 0,
+  flickerIntensity: 0,
+  showEdges: true,
+  bloomIntensity: 0.6,
+  depthPrepass: false,
+};
 
 // The default backdrop. the sky Background component special-cases this exact value to
 // render a soft neutral studio gradient instead of a flat fill.
