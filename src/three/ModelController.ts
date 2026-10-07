@@ -316,6 +316,10 @@ export class ModelController {
     this.edgesBuilder.setStyleOverride(style);
   }
 
+  setSelectionColors(edge: string, fill: string) {
+    this.selection.setColors(edge, fill);
+  }
+
   setShowEdges(v: boolean) {
     // Only build now if the model itself has finished progressively
     // attaching — building against a still-streaming-in root would only see

@@ -24,6 +24,10 @@ export interface ViewerSettings {
   autoRotate: boolean;
   background: string;
   cameraMode: CameraMode;
+  /** Selection outline colour (CSS hex). */
+  selectionColor: string;
+  /** Selection translucent face-fill colour (CSS hex). */
+  selectionFillColor: string;
 }
 
 export interface HologramSettings {
@@ -73,6 +77,8 @@ export const DEFAULT_SETTINGS: ViewerSettings = {
   autoRotate: false,
   background: SKY_BACKGROUND_HEX,
   cameraMode: "persp",
+  selectionColor: "#00aaff",
+  selectionFillColor: "#00aaff",
 };
 
 export const BACKGROUND_SWATCHES = [SKY_BACKGROUND_HEX, "#e9edf2", "#191b1f", "#ffffff"] as const;

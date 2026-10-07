@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
-import { EDGE_THRESHOLD_ANGLE, SELECTION_COLOR } from "./constants";
+import { EDGE_THRESHOLD_ANGLE, SELECTION_COLOR, SELECTION_FILL_OPACITY } from "./constants";
 import {
   extractPartGeometry,
   findPartAtFaceIndex,
@@ -52,22 +52,39 @@ export interface SelectionCallbacks {
  * its own linked line-art the same way (`MergedPart.lineArt`).
  */
 export class SelectionController {
-  selected: THREE.Mesh | null = null;
+  /** Meshes (batch meshes excluded) currently selected as one logical group. */
+  selectedMeshes: THREE.Mesh[] = [];
 
-  private selectedPart: { batch: MergedBatch; part: MergedPart } | null = null;
-  private highlight: LineSegments2 | null = null;
+  private selectedParts: { batch: MergedBatch; part: MergedPart }[] = [];
+  private highlights: THREE.Object3D[] = [];
   private hidden = new Set<THREE.Object3D>();
-  private isolated: THREE.Object3D | { batch: MergedBatch; part: MergedPart } | null = null;
+  private isolated = false;
   private mergedBatches: MergedBatch[] = [];
+  private edgeColor = new THREE.Color(SELECTION_COLOR);
+  private fillColor = new THREE.Color(SELECTION_COLOR);
 
   constructor(
     private getRoot: () => THREE.Object3D | null,
     private callbacks: SelectionCallbacks
   ) {}
 
+  get hasSelection(): boolean {
+    return this.selectedMeshes.length > 0 || this.selectedParts.length > 0;
+  }
+
   get hasHidden(): boolean {
-    if (this.hidden.size > 0 || this.isolated !== null) return true;
+    if (this.hidden.size > 0 || this.isolated) return true;
     return this.mergedBatches.some((b) => b.parts.some((p) => p.hidden));
+  }
+
+  /** Recolours the outline and face fill, including any currently shown. */
+  setColors(edge: string, fill: string) {
+    this.edgeColor.set(edge);
+    this.fillColor.set(fill);
+    this.highlights.forEach((h) => {
+      const mat = (h as THREE.Mesh).material as THREE.Material & { color: THREE.Color };
+      mat.color.copy((h as LineSegments2).isLineSegments2 ? this.edgeColor : this.fillColor);
+    });
   }
 
   /** Call after (re)building merged draw batches for the current model. */
@@ -75,18 +92,58 @@ export class SelectionController {
     this.mergedBatches = batches;
   }
 
-  select(mesh: THREE.Mesh, faceIndex?: number) {
-    const batch = mesh.userData.mergedBatch as MergedBatch | undefined;
-    const part = batch && faceIndex !== undefined ? findPartAtFaceIndex(batch, faceIndex) : null;
-    this.selected = mesh;
-    this.selectedPart = batch && part ? { batch, part } : null;
+  /**
+   * Selects every visible piece of the logical object (see tagLogicalGroups
+   * in meshMerging) that the clicked mesh/part belongs to — merged parts and
+   * still-individual meshes alike.
+   */
+  private selectGroup(groupId: number | undefined, fallbackMesh: THREE.Mesh, fallbackPart: MergedPart | null) {
+    const parts: { batch: MergedBatch; part: MergedPart }[] = [];
+    const meshes: THREE.Mesh[] = [];
+
+    if (groupId === undefined) {
+      const batch = fallbackMesh.userData.mergedBatch as MergedBatch | undefined;
+      if (batch && fallbackPart) parts.push({ batch, part: fallbackPart });
+      else meshes.push(fallbackMesh);
+    } else {
+      this.mergedBatches.forEach((batch) =>
+        batch.parts.forEach((part) => {
+          if (part.groupId === groupId && !part.hidden) parts.push({ batch, part });
+        })
+      );
+      this.getRoot()?.traverse((obj) => {
+        const m = obj as THREE.Mesh;
+        if (m.isMesh && m.visible && !m.userData.mergedBatch && m.userData.groupId === groupId) meshes.push(m);
+      });
+    }
+
+    this.selectedParts = parts;
+    this.selectedMeshes = meshes;
     this.refreshHighlight();
-    this.callbacks.onSelectionChange((this.selectedPart?.part.name ?? mesh.name) || "(không tên)");
+
+    const count = parts.length + meshes.length;
+    const base =
+      fallbackPart?.groupName ?? (fallbackMesh.userData.groupName as string | undefined) ?? fallbackMesh.name;
+    const label = base || "(no name)";
+    console.log("[select]", {
+      groupId,
+      name: label,
+      extras: fallbackPart?.groupUserData ?? fallbackMesh.userData.groupUserData ?? {},
+      members: [
+        ...parts.map(({ part }) => ({ name: part.name, triangles: part.indexCount / 3, merged: true })),
+        ...meshes.map((m) => ({
+          name: m.name || "(no name)",
+          triangles: (m.geometry.index?.count ?? m.geometry.attributes.position.count) / 3,
+          merged: false,
+        })),
+      ],
+    });
+    this.callbacks.onSelectionChange(count > 1 ? `${label} (${count} bộ phận)` : label);
   }
 
   clear() {
-    this.selected = null;
-    this.selectedPart = null;
+    this.selectedMeshes = [];
+    this.selectedParts = [];
     this.refreshHighlight();
     this.callbacks.onSelectionChange(null);
   }
@@ -95,7 +152,7 @@ export class SelectionController {
   reset() {
     this.clear();
     this.hidden.clear();
-    this.isolated = null;
+    this.isolated = false;
     this.mergedBatches = [];
   }
 
@@ -107,56 +164,39 @@ export class SelectionController {
       if (batch) {
         const part = h.faceIndex !== undefined ? findPartAtFaceIndex(batch, h.faceIndex) : null;
         if (!part || part.hidden) continue; // hit a masked/degenerate triangle — keep looking
-        this.select(obj, h.faceIndex);
+        this.selectGroup(part.groupId, obj, part);
         return;
       }
-      this.select(obj);
+      this.selectGroup(obj.userData.groupId as number | undefined, obj, null);
       return;
     }
     this.clear();
   }
 
   hideSelected() {
-    if (!this.selected) return;
-    if (this.selectedPart) {
-      setPartVisible(this.selectedPart.batch, this.selectedPart.part, false);
-      this.clear();
-      this.callbacks.onHiddenChange(this.hasHidden);
-      return;
-    }
-    this.partsOf(this.selected).forEach((o) => {
-      o.visible = false;
-      syncLineArtLinks(o, false);
-      this.hidden.add(o);
-    });
+    if (!this.hasSelection) return;
+    this.selectedParts.forEach(({ batch, part }) => setPartVisible(batch, part, false));
+    this.selectedMeshes.forEach((mesh) =>
+      this.partsOf(mesh).forEach((o) => {
+        o.visible = false;
+        syncLineArtLinks(o, false);
+        this.hidden.add(o);
+      })
+    );
     this.clear();
     this.callbacks.onHiddenChange(this.hasHidden);
   }
 
   isolateSelected() {
     const root = this.getRoot();
-    if (!this.selected || !root) return;
+    if (!this.hasSelection || !root) return;
 
-    if (this.selectedPart) {
-      const { batch: keepBatch, part: keepPart } = this.selectedPart;
-      this.isolated = { batch: keepBatch, part: keepPart };
-      this.mergedBatches.forEach((b) => b.parts.forEach((p) => setPartVisible(b, p, b === keepBatch && p === keepPart)));
-      root.traverse((obj) => {
-        if (obj.userData.isEdgeOverlay || obj === this.highlight || obj.userData.mergedBatch) return;
-        if (isRenderablePart(obj)) {
-          obj.visible = false;
-          syncLineArtLinks(obj, false);
-        }
-      });
-      this.callbacks.onHiddenChange(this.hasHidden);
-      return;
-    }
-
-    this.isolated = this.selected;
-    const keep = new Set(this.partsOf(this.selected));
-    this.mergedBatches.forEach((b) => b.parts.forEach((p) => setPartVisible(b, p, false)));
+    this.isolated = true;
+    const keepParts = new Set(this.selectedParts.map((p) => p.part));
+    const keep = new Set(this.selectedMeshes.flatMap((m) => this.partsOf(m)));
+    this.mergedBatches.forEach((b) => b.parts.forEach((p) => setPartVisible(b, p, keepParts.has(p))));
     root.traverse((obj) => {
-      if (obj.userData.isEdgeOverlay || obj === this.highlight || obj.userData.mergedBatch) return;
+      if (obj.userData.isEdgeOverlay || this.highlights.includes(obj) || obj.userData.mergedBatch) return;
       if (isRenderablePart(obj)) {
         const v = keep.has(obj);
         obj.visible = v;
@@ -169,7 +209,7 @@ export class SelectionController {
   showAll() {
     const root = this.getRoot();
     root?.traverse((obj) => {
-      if (obj.userData.isEdgeOverlay || obj === this.highlight || obj.userData.mergedBatch) return;
+      if (obj.userData.isEdgeOverlay || this.highlights.includes(obj) || obj.userData.mergedBatch) return;
       if (isRenderablePart(obj)) {
         obj.visible = true;
         syncLineArtLinks(obj, true);
@@ -177,22 +217,24 @@ export class SelectionController {
     });
     this.mergedBatches.forEach((b) => b.parts.forEach((p) => setPartVisible(b, p, true)));
     this.hidden.clear();
-    this.isolated = null;
+    this.isolated = false;
     this.callbacks.onHiddenChange(this.hasHidden);
   }
 
   /** Re-apply the LineMaterial's screen resolution after a resize. */
   onResize() {
-    if (this.highlight) {
-      (this.highlight.material as LineMaterial).resolution.set(window.innerWidth, window.innerHeight);
-    }
+    this.highlights.forEach((h) => {
+      if ((h as LineSegments2).isLineSegments2) {
+        ((h as LineSegments2).material as LineMaterial).resolution.set(window.innerWidth, window.innerHeight);
+      }
+    });
   }
 
   private partsOf(obj: THREE.Object3D): THREE.Object3D[] {
     const list: THREE.Object3D[] = [obj];
     obj.parent?.children.forEach((sib) => {
       if (sib === obj) return;
-      if (sib.userData.isEdgeOverlay || sib === this.highlight) return;
+      if (sib.userData.isEdgeOverlay || this.highlights.includes(sib)) return;
       const s = sib as Partial<THREE.LineSegments & THREE.Line & THREE.Points>;
       if (s.isLineSegments || s.isLine || s.isPoints) list.push(sib);
     });
@@ -200,31 +242,55 @@ export class SelectionController {
   }
 
   private refreshHighlight() {
-    if (this.highlight) {
-      this.highlight.parent?.remove(this.highlight);
-      this.highlight.geometry.dispose();
-      (this.highlight.material as LineMaterial).dispose();
-      this.highlight = null;
-    }
-    if (!this.selected) return;
+    this.highlights.forEach((h) => {
+      const o = h as THREE.Mesh;
+      h.parent?.remove(h);
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
+    });
+    this.highlights = [];
 
-    let edgeSourceGeo: THREE.BufferGeometry = this.selected.geometry;
-    let ownsSourceGeo = false;
-    if (this.selectedPart) {
-      edgeSourceGeo = extractPartGeometry(this.selectedPart.batch, this.selectedPart.part);
-      ownsSourceGeo = true;
-    }
+    this.selectedParts.forEach(({ batch, part }) => {
+      const geo = extractPartGeometry(batch, part);
+      this.addHighlight(batch.mesh, geo);
+      geo.dispose();
+    });
+    this.selectedMeshes.forEach((mesh) => this.addHighlight(mesh, mesh.geometry));
+  }
 
-    const edges = new THREE.EdgesGeometry(edgeSourceGeo, EDGE_THRESHOLD_ANGLE);
-    if (ownsSourceGeo) edgeSourceGeo.dispose();
+  private addHighlight(host: THREE.Mesh, sourceGeo: THREE.BufferGeometry) {
+    // Translucent face tint. Own position-only geometry copy so disposing it
+    // later never touches the source mesh's GPU buffers.
+    const fillGeo = new THREE.BufferGeometry();
+    fillGeo.setAttribute("position", sourceGeo.attributes.position.clone());
+    if (sourceGeo.index) fillGeo.setIndex(sourceGeo.index.clone());
+    const fill = new THREE.Mesh(
+      fillGeo,
+      new THREE.MeshBasicMaterial({
+        color: this.fillColor,
+        transparent: true,
+        opacity: SELECTION_FILL_OPACITY,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      })
+    );
+    fill.raycast = () => {};
+    fill.renderOrder = 998;
+    host.add(fill);
+    this.highlights.push(fill);
+
+    const edges = new THREE.EdgesGeometry(sourceGeo, EDGE_THRESHOLD_ANGLE);
     const lineGeo = new LineSegmentsGeometry();
     lineGeo.setPositions(edges.attributes.position.array as Float32Array);
     edges.dispose();
 
     const mat = new LineMaterial({
-      color: SELECTION_COLOR,
+      color: this.edgeColor,
       linewidth: 1, // thin, screen-space pixels
-      worldUnits: false, 
+      worldUnits: false,
       depthTest: false, // always draw on top, never hidden behind other objects
       transparent: true,
     });
@@ -233,10 +299,10 @@ export class SelectionController {
     const line = new LineSegments2(lineGeo, mat);
     line.raycast = () => {};
     line.renderOrder = 999;
-    // Child of the mesh itself (local space) so it exactly follows the
-    // mesh's real transform, including any orientation/mirror fix applied
-    // higher up via the pivot group.
-    this.selected.add(line);
-    this.highlight = line;
+    // Child of the host mesh (local space) so it exactly follows the mesh's
+    // real transform, including any orientation/mirror fix applied higher up
+    // via the pivot group.
+    host.add(line);
+    this.highlights.push(line);
   }
 }

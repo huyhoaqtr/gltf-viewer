@@ -10,7 +10,7 @@ export const EDGE_WORKER_BATCH_VERTEX_COUNT = 100_000;
 
 export const EDGE_THRESHOLD_ANGLE = 15; // degrees; low angles trace every subdivision seam on curved geometry
 export const EDGE_COLOR = 0x1b1e20;
-export const SELECTION_COLOR = 0xffbf54;
+export const SELECTION_COLOR = 0x00aaff;
 
 export const CUBE_NAV = {
   marginX: 18,
@@ -20,3 +20,4 @@ export const CUBE_NAV = {
 
 /** Hologram mode skips the edges overlay on models heavier than this. */
 export const HOLOGRAM_EDGES_MAX_TRIANGLES = 6_000_000;
+export const SELECTION_FILL_OPACITY = 0.2;

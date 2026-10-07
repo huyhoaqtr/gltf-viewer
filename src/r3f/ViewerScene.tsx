@@ -9,7 +9,7 @@ import { CubeNavigator } from "../three/cubeNavigator";
 import { ModelController, type FrameInfo } from "../three/ModelController";
 import { createGradientTexture, createSkyGradientTexture } from "../three/skyBackground";
 import { selectEdgesEnabled, useViewerStore } from "../state/viewerStore";
-import { SKY_BACKGROUND_HEX } from "../types/viewer";
+import { DEFAULT_SETTINGS, SKY_BACKGROUND_HEX } from "../types/viewer";
 import { HologramEffects } from "./hologram/HologramEffects";
 import { HOLOGRAM_COLORS } from "./hologram/palette";
 import { useHologramMode } from "./hologram/useHologramMode";
@@ -132,13 +132,25 @@ function Lights({ frame }: { frame: FrameInfo }) {
   const r = frame.radius;
   const angle = (sunAngle * Math.PI) / 180;
   const dist = r * 2.2;
+  const [cx, cy, cz] = frame.center;
+
+  // The sun and its shadow camera must be centred on the model, not the world
+  // origin — CAD/BIM exports often sit thousands of units away from (0,0,0),
+  // which would leave the whole model outside the shadow frustum.
+  const target = useMemo(() => new THREE.Object3D(), []);
+  useLayoutEffect(() => {
+    target.position.set(cx, cy, cz);
+    target.updateMatrixWorld();
+  }, [target, cx, cy, cz]);
 
   return (
     <>
+      <primitive object={target} />
       <directionalLight
+        target={target}
         color={0xffffff}
         intensity={hologram ? 0 : sunIntensity}
-        position={[Math.cos(angle) * dist, dist * 0.9, Math.sin(angle) * dist]}
+        position={[cx + Math.cos(angle) * dist, cy + dist * 0.9, cz + Math.sin(angle) * dist]}
         castShadow={showShadows}
         shadow-mapSize={[2048, 2048]}
         shadow-bias={-0.00035}
@@ -344,6 +356,14 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
   useEffect(() => {
     rt.controller?.scheduleRestyle();
   }, [rt, roughnessFloor, flattenMetal, doubleSided]);
+
+  const { selectionColor, selectionFillColor } = useViewerStore((s) => s.settings);
+  useEffect(() => {
+    rt.controller?.setSelectionColors(
+      selectionColor ?? DEFAULT_SETTINGS.selectionColor,
+      selectionFillColor ?? DEFAULT_SETTINGS.selectionFillColor
+    );
+  }, [rt, selectionColor, selectionFillColor]);
 
   useEffect(() => {
     rt.controller?.setShowEdges(edgesEnabled);

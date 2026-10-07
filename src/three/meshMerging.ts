@@ -35,6 +35,11 @@ export interface LineArtLink {
 export interface MergedPart {
   index: number;
   name: string;
+  /** Logical object this part belongs to (see tagLogicalGroups) — clicking selects the whole group. */
+  groupId: number;
+  groupName: string;
+  /** glTF node extras (e.g. CAD handle) of the group's parent node. */
+  groupUserData: Record<string, unknown>;
   indexStart: number;
   indexCount: number;
   hidden: boolean;
@@ -100,6 +105,31 @@ export function findLineArtSiblings(root: THREE.Object3D): Map<LineArtObject, TH
 }
 
 /**
+ * CAD/BIM exports model one real object (e.g. a pump) as a parent node with
+ * several mesh children (base, casing, motor...). Tag every mesh with the id
+ * and name of its immediate parent node so a click can select that whole
+ * object instead of a single child mesh. A mesh sitting directly under the
+ * root has no parent object and forms a group of its own. Must run on the
+ * pristine tree (before meshes are removed by the merge).
+ */
+function tagLogicalGroups(root: THREE.Object3D) {
+  const ids = new Map<THREE.Object3D, number>();
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const owner = mesh.parent && mesh.parent !== root ? mesh.parent : mesh;
+    let id = ids.get(owner);
+    if (id === undefined) {
+      id = ids.size;
+      ids.set(owner, id);
+    }
+    mesh.userData.groupId = id;
+    mesh.userData.groupUserData = owner === mesh ? {} : { ...owner.userData };
+    mesh.userData.groupName = owner.name || mesh.name || "(no name)";
+  });
+}
+
+/**
  * Folds every eligible mesh sharing the same material into one big mesh per
  * material (BIM/CAD exports with no grouping can have tens of thousands of
  * tiny separate meshes — each is its own draw call regardless of triangle
@@ -123,6 +153,8 @@ export function mergeMeshesByMaterial(
 ): { batches: MergedBatch[]; meshToPart: Map<THREE.Mesh, { batch: MergedBatch; part: MergedPart }> } {
   root.updateMatrixWorld(true);
   const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
+
+  tagLogicalGroups(root);
 
   const groups = new Map<THREE.Material, THREE.Mesh[]>();
   root.traverse((obj) => {
@@ -200,7 +232,10 @@ export function mergeMeshesByMaterial(
       const count = mesh.geometry.index ? mesh.geometry.index.count : mesh.geometry.attributes.position.count;
       parts.push({
         index: i,
-        name: mesh.name || "(không tên)",
+        name: mesh.name || "(no name)",
+        groupId: mesh.userData.groupId as number,
+        groupName: mesh.userData.groupName as string,
+        groupUserData: mesh.userData.groupUserData as Record<string, unknown>,
         indexStart: cursor,
         indexCount: count,
         hidden: false,
