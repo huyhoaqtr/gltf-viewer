@@ -1,23 +1,32 @@
 import { useViewerStore } from "../../state/viewerStore";
 import type { CameraMode } from "../../types/viewer";
+import { Section } from "./Section";
+
+const MODES: { id: CameraMode; label: string; title: string }[] = [
+  { id: "persp", label: "Phối cảnh", title: "Perspective" },
+  { id: "ortho", label: "Song song", title: "Orthographic" },
+];
 
 export function CameraSection() {
-  const settings = useViewerStore((s) => s.settings);
+  const cameraMode = useViewerStore((s) => s.settings.cameraMode);
   const updateSetting = useViewerStore((s) => s.updateSetting);
 
   return (
-    <div className="group">
-      <h3>Camera</h3>
-      <select
-        value={settings.cameraMode}
-        onChange={(e) => {
-          const v = e.target.value as CameraMode;
-          updateSetting("cameraMode", v);
-        }}
-      >
-        <option value="persp">Phối cảnh (Perspective)</option>
-        <option value="ortho">Song song (Ortho)</option>
-      </select>
-    </div>
+    <Section title="Camera">
+      <div className="segmented" role="radiogroup" aria-label="Chế độ camera">
+        {MODES.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            role="radio"
+            aria-checked={cameraMode === m.id}
+            title={m.title}
+            onClick={() => updateSetting("cameraMode", m.id)}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+    </Section>
   );
 }

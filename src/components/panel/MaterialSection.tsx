@@ -1,4 +1,5 @@
 import { useViewerStore } from "../../state/viewerStore";
+import { Section } from "./Section";
 import { Slider } from "./Slider";
 import { CheckboxRow } from "./CheckboxRow";
 
@@ -7,8 +8,7 @@ export function MaterialSection() {
   const updateSetting = useViewerStore((s) => s.updateSetting);
 
   return (
-    <div className="group">
-      <h3>Vật liệu</h3>
+    <Section title="Vật liệu">
       <Slider
         id="roughness"
         label="Độ nhám tối thiểu"
@@ -17,26 +17,22 @@ export function MaterialSection() {
         step={0.05}
         value={settings.roughnessFloor}
         format={(v) => v.toFixed(2)}
-        onChange={(v) => {
-          updateSetting("roughnessFloor", v);
-        }}
+        onChange={(v) => updateSetting("roughnessFloor", v)}
       />
       <CheckboxRow
         id="flattenMetal"
-        label="Ép kim loại về 0 (kiến trúc)"
+        label="Ép kim loại về 0"
+        hint="Dùng cho model kiến trúc"
         checked={settings.flattenMetal}
-        onChange={(v) => {
-          updateSetting("flattenMetal", v);
-        }}
+        onChange={(v) => updateSetting("flattenMetal", v)}
       />
       <CheckboxRow
         id="doubleSided"
-        label="Hiển thị hai mặt (sửa mặt bị đen/mất)"
+        label="Hiển thị hai mặt"
+        hint="Sửa mặt bị đen / mất"
         checked={settings.doubleSided}
-        onChange={(v) => {
-          updateSetting("doubleSided", v);
-        }}
+        onChange={(v) => updateSetting("doubleSided", v)}
       />
-    </div>
+    </Section>
   );
 }

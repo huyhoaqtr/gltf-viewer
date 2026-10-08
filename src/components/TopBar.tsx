@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { viewerApi } from "../r3f/viewerApi";
 import { useViewerStore } from "../state/viewerStore";
 import { formatCount } from "../utils/format";
+import { IconFit, IconHologram, IconOpen, IconPanel } from "./Icons";
 
 export function TopBar() {
   const fileName = useViewerStore((s) => s.fileName);
@@ -14,40 +15,46 @@ export function TopBar() {
 
   return (
     <div id="topbar">
-      <div className="brand">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}>
+      <div className="file-card">
+        <svg className="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6}>
           <path d="M12 2 3 7v10l9 5 9-5V7z" />
           <path d="M3 7l9 5 9-5M12 12v10" />
         </svg>
-        <div className="brand-text">
-          <span className="brand-title">GLB Viewer</span>
-          <span className="brand-sub">{fileName ?? "Xem model 3D"}</span>
+        <div className="file-text">
+          <span className="file-name" title={fileName ?? undefined}>
+            {fileName ?? "GLB Viewer"}
+          </span>
+          <span className="file-meta">
+            {stats
+              ? `${formatCount(stats.meshCount)} mesh · ${formatCount(stats.triangleCount)} tam giác`
+              : "Chưa mở model"}
+          </span>
         </div>
       </div>
-      <span className="filename">
-        {stats ? `${formatCount(stats.meshCount)} mesh · ${formatCount(stats.triangleCount)} tam giác` : ""}
-      </span>
       <div className="spacer" />
       <div className="toolbar-pill">
-        <button className="btn" onClick={() => inputRef.current?.click()}>
-          Mở file .glb / .gltf
+        <button className="btn primary" onClick={() => inputRef.current?.click()}>
+          <IconOpen />
+          <span className="label">Mở file</span>
         </button>
         <span className="toolbar-divider" />
-        <button className="btn" disabled={!fileName} title="Zoom extents" onClick={() => viewerApi.fitToView()}>
-          Fit
+        <button className="btn" disabled={!fileName} title="Zoom vừa khít model" onClick={() => viewerApi.fitToView()}>
+          <IconFit />
+          <span className="label">Fit</span>
         </button>
-        <span className="toolbar-divider" />
         <button
           className="btn toggle"
           aria-pressed={viewMode === "hologram"}
           title="Chế độ Hologram (H)"
           onClick={toggleHologram}
         >
-          Hologram
+          <IconHologram />
+          <span className="label">Hologram</span>
         </button>
         <span className="toolbar-divider" />
         <button className="btn toggle" aria-pressed={panelOpen} title="Bảng điều khiển" onClick={togglePanel}>
-          Cài đặt
+          <IconPanel />
+          <span className="label">Cài đặt</span>
         </button>
       </div>
       <input

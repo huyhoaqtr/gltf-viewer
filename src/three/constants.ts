@@ -10,7 +10,7 @@ export const EDGE_WORKER_BATCH_VERTEX_COUNT = 100_000;
 
 export const EDGE_THRESHOLD_ANGLE = 15; // degrees; low angles trace every subdivision seam on curved geometry
 export const EDGE_COLOR = 0x1b1e20;
-export const SELECTION_COLOR = 0x00aaff;
+export const SELECTION_COLOR = 0xff9800;
 
 export const CUBE_NAV = {
   marginX: 18,

@@ -1,6 +1,7 @@
 import { viewerApi } from "../../r3f/viewerApi";
 import { useViewerStore } from "../../state/viewerStore";
 import { DEFAULT_SETTINGS } from "../../types/viewer";
+import { Section } from "./Section";
 
 export function SelectionSection() {
   const selectedName = useViewerStore((s) => s.selectedName);
@@ -10,47 +11,56 @@ export function SelectionSection() {
   const updateSetting = useViewerStore((s) => s.updateSetting);
 
   return (
-    <div className="group">
-      <h3>Đối tượng đã chọn</h3>
-      <span className="selection-name">{selectedName ?? "Chưa chọn gì"}</span>
-      <div className="btn-row">
-        <button className="btn" disabled={!selectedName} onClick={() => viewerApi.hideSelected()}>
-          Ẩn
-        </button>
-        <button className="btn" disabled={!selectedName} onClick={() => viewerApi.isolateSelected()}>
-          Cô lập
-        </button>
-        <button className="btn" disabled={!hasHidden} onClick={() => viewerApi.showAllObjects()}>
+    <>
+      <Section title="Đối tượng đã chọn">
+        <span className={`selection-name${selectedName ? "" : " empty"}`} title={selectedName ?? undefined}>
+          {selectedName ?? "Chưa chọn gì"}
+        </span>
+        <div className="btn-row">
+          <button type="button" className="btn" disabled={!selectedName} onClick={() => viewerApi.hideSelected()}>
+            Ẩn
+          </button>
+          <button type="button" className="btn" disabled={!selectedName} onClick={() => viewerApi.isolateSelected()}>
+            Cô lập
+          </button>
+        </div>
+        <button type="button" className="btn block" disabled={!hasHidden} onClick={() => viewerApi.showAllObjects()}>
           Hiện tất cả
         </button>
-      </div>
-      <div className="color-row">
-        <label>
-          Màu viền
-          <input type="color" value={selectionColor} onChange={(e) => updateSetting("selectionColor", e.target.value)} />
-        </label>
-        <label>
-          Màu mặt (fill)
-          <input
-            type="color"
-            value={selectionFillColor}
-            onChange={(e) => updateSetting("selectionFillColor", e.target.value)}
-          />
-        </label>
+        <p className="hint-text">Click vào một bộ phận trong model để chọn. Click khoảng trống hoặc nhấn Esc để bỏ chọn.</p>
+      </Section>
+      <Section title="Màu chọn">
+        <div className="color-grid">
+          <label className="field">
+            <span className="field-head">Màu viền</span>
+            <input
+              type="color"
+              className="color-input"
+              value={selectionColor}
+              onChange={(e) => updateSetting("selectionColor", e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="field-head">Màu mặt (fill)</span>
+            <input
+              type="color"
+              className="color-input"
+              value={selectionFillColor}
+              onChange={(e) => updateSetting("selectionFillColor", e.target.value)}
+            />
+          </label>
+        </div>
         <button
           type="button"
-          className="btn"
+          className="btn block"
           onClick={() => {
             updateSetting("selectionColor", DEFAULT_SETTINGS.selectionColor);
             updateSetting("selectionFillColor", DEFAULT_SETTINGS.selectionFillColor);
           }}
         >
-          Mặc định
+          Màu mặc định
         </button>
-      </div>
-      <p className="hint-text">
-        Click vào 1 bộ phận trong model để chọn (viền cam). Click khoảng trống hoặc nhấn Esc để bỏ chọn.
-      </p>
-    </div>
+      </Section>
+    </>
   );
 }

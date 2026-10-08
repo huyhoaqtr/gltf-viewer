@@ -1,4 +1,5 @@
 import { useViewerStore } from "../../state/viewerStore";
+import { Section } from "./Section";
 import { Slider } from "./Slider";
 
 export function LightingSection() {
@@ -6,8 +7,7 @@ export function LightingSection() {
   const updateSetting = useViewerStore((s) => s.updateSetting);
 
   return (
-    <div className="group">
-      <h3>Ánh sáng</h3>
+    <Section title="Ánh sáng">
       <Slider
         id="sunIntensity"
         label="Nắng (sun)"
@@ -16,9 +16,7 @@ export function LightingSection() {
         step={0.1}
         value={settings.sunIntensity}
         format={(v) => v.toFixed(1)}
-        onChange={(v) => {
-          updateSetting("sunIntensity", v);
-        }}
+        onChange={(v) => updateSetting("sunIntensity", v)}
       />
       <Slider
         id="skyIntensity"
@@ -28,9 +26,7 @@ export function LightingSection() {
         step={0.1}
         value={settings.skyIntensity}
         format={(v) => v.toFixed(1)}
-        onChange={(v) => {
-          updateSetting("skyIntensity", v);
-        }}
+        onChange={(v) => updateSetting("skyIntensity", v)}
       />
       <Slider
         id="exposure"
@@ -40,9 +36,7 @@ export function LightingSection() {
         step={0.05}
         value={settings.exposure}
         format={(v) => v.toFixed(2)}
-        onChange={(v) => {
-          updateSetting("exposure", v);
-        }}
+        onChange={(v) => updateSetting("exposure", v)}
       />
       <Slider
         id="sunAngle"
@@ -52,10 +46,8 @@ export function LightingSection() {
         step={1}
         value={settings.sunAngle}
         format={(v) => `${Math.round(v)}°`}
-        onChange={(v) => {
-          updateSetting("sunAngle", v);
-        }}
+        onChange={(v) => updateSetting("sunAngle", v)}
       />
-    </div>
+    </Section>
   );
 }

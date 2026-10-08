@@ -10,9 +10,13 @@ interface SliderProps {
 }
 
 export function Slider({ id, label, min, max, step, value, format, onChange }: SliderProps) {
+  const pct = ((value - min) / (max - min)) * 100;
   return (
-    <div className="row">
-      <label htmlFor={id}>{label}</label>
+    <div className="slider">
+      <div className="slider-head">
+        <label htmlFor={id}>{label}</label>
+        <span className="val">{format(value)}</span>
+      </div>
       <input
         id={id}
         type="range"
@@ -20,9 +24,9 @@ export function Slider({ id, label, min, max, step, value, format, onChange }: S
         max={max}
         step={step}
         value={value}
+        style={{ ["--pct" as string]: `${pct}%` }}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      <span className="val">{format(value)}</span>
     </div>
   );
 }

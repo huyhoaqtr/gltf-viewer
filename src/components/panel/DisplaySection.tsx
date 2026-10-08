@@ -1,4 +1,5 @@
 import { useViewerStore } from "../../state/viewerStore";
+import { Section } from "./Section";
 import { CheckboxRow } from "./CheckboxRow";
 
 export function DisplaySection() {
@@ -6,32 +7,25 @@ export function DisplaySection() {
   const updateSetting = useViewerStore((s) => s.updateSetting);
 
   return (
-    <div className="group">
-      <h3>Hiển thị</h3>
+    <Section title="Hiển thị">
       <CheckboxRow
         id="showEdges"
-        label="Đường viền cạnh (edges)"
+        label="Đường viền cạnh"
         checked={settings.showEdges}
-        onChange={(v) => {
-          updateSetting("showEdges", v);
-        }}
+        onChange={(v) => updateSetting("showEdges", v)}
       />
       <CheckboxRow
         id="showShadows"
         label="Đổ bóng"
         checked={settings.showShadows}
-        onChange={(v) => {
-          updateSetting("showShadows", v);
-        }}
+        onChange={(v) => updateSetting("showShadows", v)}
       />
       <CheckboxRow
         id="autoRotate"
         label="Tự xoay"
         checked={settings.autoRotate}
-        onChange={(v) => {
-          updateSetting("autoRotate", v);
-        }}
+        onChange={(v) => updateSetting("autoRotate", v)}
       />
-    </div>
+    </Section>
   );
 }

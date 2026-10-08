@@ -77,8 +77,8 @@ export const DEFAULT_SETTINGS: ViewerSettings = {
   autoRotate: false,
   background: SKY_BACKGROUND_HEX,
   cameraMode: "persp",
-  selectionColor: "#00aaff",
-  selectionFillColor: "#00aaff",
+  selectionColor: "#ff9800",
+  selectionFillColor: "#ff9800",
 };
 
 export const BACKGROUND_SWATCHES = [SKY_BACKGROUND_HEX, "#e9edf2", "#191b1f", "#ffffff"] as const;
