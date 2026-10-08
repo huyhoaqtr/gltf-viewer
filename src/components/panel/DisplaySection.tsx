@@ -15,10 +15,23 @@ export function DisplaySection() {
         onChange={(v) => updateSetting("showEdges", v)}
       />
       <CheckboxRow
+        id="antialias"
+        label="Khử răng cưa"
+        hint="Siêu lấy mẫu: đường mảnh mịn hơn, tốn GPU hơn"
+        checked={settings.antialias}
+        onChange={(v) => updateSetting("antialias", v)}
+      />
+      <CheckboxRow
         id="showShadows"
         label="Đổ bóng"
         checked={settings.showShadows}
         onChange={(v) => updateSetting("showShadows", v)}
+      />
+      <CheckboxRow
+        id="showFps"
+        label="Hiển thị FPS"
+        checked={settings.showFps}
+        onChange={(v) => updateSetting("showFps", v)}
       />
       <CheckboxRow
         id="autoRotate"

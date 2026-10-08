@@ -11,6 +11,7 @@ export interface ViewerSettings {
   sunIntensity: number;
   skyIntensity: number;
   exposure: number;
+  contrast: number;
   sunAngle: number;
   roughnessFloor: number;
   flattenMetal: boolean;
@@ -22,6 +23,9 @@ export interface ViewerSettings {
   showEdges: boolean;
   showShadows: boolean;
   autoRotate: boolean;
+  /** Supersampling: renders at a higher resolution, then downsamples. Smoother thin lines, heavier on the GPU. */
+  antialias: boolean;
+  showFps: boolean;
   background: string;
   cameraMode: CameraMode;
   /** Selection outline colour (CSS hex). */
@@ -42,18 +46,20 @@ export interface HologramSettings {
   bloomIntensity: number;
   /** Depth-only pre-pass so only the nearest surface glows (off = see-through X-ray look). */
   depthPrepass: boolean;
+  showGrid: boolean;
 }
 
 export const DEFAULT_HOLOGRAM_SETTINGS: HologramSettings = {
-  color: "#00E5FF",
-  rimPower: 2.5,
+  color: "#00bfff",
+  rimPower: 6,
   opacity: 0.3,
-  scanlineDensity: 40,
+  scanlineDensity: 0,
   scanlineSpeed: 0,
   flickerIntensity: 0,
-  showEdges: true,
-  bloomIntensity: 0.6,
+  showEdges: false,
+  bloomIntensity: 0,
   depthPrepass: false,
+  showGrid: true,
 };
 
 // The default backdrop. the sky Background component special-cases this exact value to
@@ -64,6 +70,7 @@ export const DEFAULT_SETTINGS: ViewerSettings = {
   sunIntensity: 2,
   skyIntensity: 0.9,
   exposure: 1,
+  contrast: 1.5,
   sunAngle: 195,
   roughnessFloor: 0.55,
   flattenMetal: true,
@@ -75,6 +82,8 @@ export const DEFAULT_SETTINGS: ViewerSettings = {
   showEdges: true,
   showShadows: true,
   autoRotate: false,
+  antialias: false,
+  showFps: true,
   background: SKY_BACKGROUND_HEX,
   cameraMode: "persp",
   selectionColor: "#ff9800",

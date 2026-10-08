@@ -6,6 +6,7 @@ import { DropZone } from "./components/DropZone";
 import { LoadingOverlay } from "./components/LoadingOverlay";
 import { ToastBanner } from "./components/ToastBanner";
 import { useHologramHotkey } from "./hooks/useHologramHotkey";
+import { FpsPanel } from "./components/FpsPanel";
 import { Hint } from "./components/Hint";
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
       <DropZone />
       <LoadingOverlay />
       <ToastBanner />
+      <FpsPanel />
       <Hint />
     </>
   );

@@ -16,6 +16,13 @@ export function selectEdgesEnabled(s: Pick<ViewerStore, "viewMode" | "settings" 
   return s.hologramSettings.showEdges && !tooHeavy;
 }
 
+export interface FpsStats {
+  fps: number;
+  ms: number;
+  calls: number;
+  triangles: number;
+}
+
 interface ViewerStore {
   // Single source of truth for viewer settings: the control panel writes
   // here and the R3F scene components read from it.
@@ -28,6 +35,9 @@ interface ViewerStore {
   toggleHologram: () => void;
   hologramSettings: HologramSettings;
   updateHologramSetting: <K extends keyof HologramSettings>(key: K, value: HologramSettings[K]) => void;
+
+  fpsStats: FpsStats | null;
+  setFpsStats: (stats: FpsStats) => void;
 
   panelOpen: boolean;
   togglePanel: () => void;
@@ -76,6 +86,9 @@ export const useViewerStore = create<ViewerStore>((set) => ({
   toggleHologram: () => set((s) => ({ viewMode: s.viewMode === "hologram" ? "standard" : "hologram" })),
   hologramSettings: { ...DEFAULT_HOLOGRAM_SETTINGS },
   updateHologramSetting: (key, value) => set((s) => ({ hologramSettings: { ...s.hologramSettings, [key]: value } })),
+
+  fpsStats: null,
+  setFpsStats: (fpsStats) => set({ fpsStats }),
 
   panelOpen: true,
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),

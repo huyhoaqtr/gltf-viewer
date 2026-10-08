@@ -39,6 +39,16 @@ export function LightingSection() {
         onChange={(v) => updateSetting("exposure", v)}
       />
       <Slider
+        id="contrast"
+        label="Độ tương phản"
+        min={0.5}
+        max={1.8}
+        step={0.05}
+        value={settings.contrast}
+        format={(v) => v.toFixed(2)}
+        onChange={(v) => updateSetting("contrast", v)}
+      />
+      <Slider
         id="sunAngle"
         label="Góc nắng"
         min={0}

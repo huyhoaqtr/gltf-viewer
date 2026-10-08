@@ -79,6 +79,7 @@ export function HologramSection() {
         format={(v) => v.toFixed(2)}
         onChange={(v) => update("flickerIntensity", v)}
       />
+      <CheckboxRow id="holoGrid" label="Lưới nền (grid)" checked={h.showGrid} onChange={(v) => update("showGrid", v)} />
       <CheckboxRow id="holoEdges" label="Đường viền cạnh" checked={h.showEdges} onChange={(v) => update("showEdges", v)} />
       <CheckboxRow
         id="holoPrepass"

@@ -1,3 +1,4 @@
+import { modelContrast } from "../three/modelStyling";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useStore, useThree } from "@react-three/fiber";
 import * as THREE from "three";
@@ -13,6 +14,7 @@ import { DEFAULT_SETTINGS, SKY_BACKGROUND_HEX } from "../types/viewer";
 import { HologramEffects } from "./hologram/HologramEffects";
 import { HOLOGRAM_COLORS } from "./hologram/palette";
 import { useHologramMode } from "./hologram/useHologramMode";
+import { FpsMeter } from "./FpsMeter";
 import { registerViewerApi } from "./viewerApi";
 import { SceneRuntimeContext, useSceneRuntime, type SceneRuntime } from "./runtime";
 
@@ -43,6 +45,7 @@ export function ViewerScene() {
       <HologramLayer frame={frame} />
       {import.meta.env.DEV && <DebugHandle />}
       <CubeGizmo />
+      <FpsMeter />
     </SceneRuntimeContext.Provider>
   );
 }
@@ -353,6 +356,12 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
     rt.controller?.setOrientation({ upAxis, flipX, flipZ, spin180 });
   }, [rt, upAxis, flipX, flipZ, spin180]);
 
+  const contrast = useViewerStore((s) => s.settings.contrast);
+  useEffect(() => {
+    // Shared uniform read by every patched model material: no restyle or recompile needed.
+    modelContrast.value = contrast;
+  }, [contrast]);
+
   useEffect(() => {
     rt.controller?.scheduleRestyle();
   }, [rt, roughnessFloor, flattenMetal, doubleSided]);
@@ -484,7 +493,9 @@ function CubeGizmo() {
   // Standard mode: this renders the main scene (a positive priority disables
   // R3F's auto render). In hologram mode the EffectComposer renders it instead.
   useFrame(({ gl, scene, camera }) => {
-    if (useViewerStore.getState().viewMode === "hologram") return;
+    const state = useViewerStore.getState();
+    // Hologram with bloom: the EffectComposer renders the scene instead.
+    if (state.viewMode === "hologram" && state.hologramSettings.bloomIntensity > 0) return;
     // The EffectComposer turns autoClear off and doesn't restore it on unmount.
     // With a texture background three.js only clears color/depth when autoClear
     // is on, so a stale depth buffer would punch holes in the model while orbiting.

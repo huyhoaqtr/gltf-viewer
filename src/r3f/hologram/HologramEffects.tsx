@@ -11,11 +11,13 @@ import { HOLOGRAM_COLORS } from "./palette";
  * mode disposes the composer and its render targets.
  */
 export function HologramEffects({ frame }: { frame: { radius: number; minY: number; center: [number, number, number] } }) {
+  const showGrid = useViewerStore((s) => s.hologramSettings.showGrid);
+  const bloom = useViewerStore((s) => s.hologramSettings.bloomIntensity > 0);
   return (
     <>
       <fog attach="fog" args={[HOLOGRAM_COLORS.fog, frame.radius * 4, frame.radius * 30]} />
-      <HologramGrid frame={frame} />
-      <HologramPostFx />
+      {showGrid && <HologramGrid frame={frame} />}
+      {bloom && <HologramPostFx />}
     </>
   );
 }
@@ -45,11 +47,13 @@ function HologramGrid({ frame }: { frame: { radius: number; minY: number; center
 
 function HologramPostFx() {
   const bloomIntensity = useViewerStore((s) => s.hologramSettings.bloomIntensity);
+  // Supersampling already smooths edges, so the composer's own MSAA would just be paid for twice.
+  const supersampled = useViewerStore((s) => s.settings.antialias);
 
   return (
-    <EffectComposer multisampling={4} renderPriority={1}>
+    <EffectComposer multisampling={supersampled ? 0 : 2} renderPriority={1}>
       {/* Threshold sits above the body's base glow, so only the rim and edges bloom. */}
-      <Bloom mipmapBlur intensity={bloomIntensity} luminanceThreshold={0.9} luminanceSmoothing={0.15} />
+      <Bloom mipmapBlur levels={5} intensity={bloomIntensity} luminanceThreshold={0.9} luminanceSmoothing={0.15} />
     </EffectComposer>
   );
 }

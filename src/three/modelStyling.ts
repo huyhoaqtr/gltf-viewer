@@ -15,6 +15,28 @@ export function computeStats(root: THREE.Object3D): ModelStats {
   return { meshCount, triangleCount: Math.round(triangleCount) };
 }
 
+/** Shared by every model material's patched shader, so changing it needs no recompile. */
+export const modelContrast = { value: 1 };
+
+/** Adds a contrast adjustment (around mid-grey, in display space) to the material's final colour. */
+function patchContrast(m: THREE.Material) {
+  if (m.userData.contrastPatched) return;
+  m.userData.contrastPatched = true;
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, renderer) => {
+    prev?.call(m, shader, renderer);
+    shader.uniforms.uContrast = modelContrast;
+    shader.fragmentShader = shader.fragmentShader
+      .replace("void main() {", "uniform float uContrast;\nvoid main() {")
+      .replace(
+        "#include <colorspace_fragment>",
+        "#include <colorspace_fragment>\n  gl_FragColor.rgb = clamp((gl_FragColor.rgb - 0.5) * uContrast + 0.5, 0.0, 1.0);"
+      );
+  };
+  const prevKey = m.customProgramCacheKey;
+  m.customProgramCacheKey = () => `${prevKey.call(m)}|contrast`;
+}
+
 export interface MaterialStyleOptions {
   roughnessFloor: number;
   flattenMetal: boolean;
@@ -44,6 +66,7 @@ export function applyMaterialStyle(root: THREE.Object3D, opts: MaterialStyleOpti
         if (opts.flattenMetal) std.metalness = Math.min(std.metalness ?? 0, 0.05);
         std.envMapIntensity = 0.35;
       }
+      patchContrast(m);
       m.side = opts.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
       m.needsUpdate = true;
     });
