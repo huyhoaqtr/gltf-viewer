@@ -39,6 +39,12 @@ interface ViewerStore {
   fpsStats: FpsStats | null;
   setFpsStats: (stats: FpsStats) => void;
 
+  /** View cube: camera looks straight at a face / pointer is over the cube (drives the arrow buttons). */
+  cubeAligned: boolean;
+  cubeHover: boolean;
+  setCubeAligned: (v: boolean) => void;
+  setCubeHover: (v: boolean) => void;
+
   panelOpen: boolean;
   togglePanel: () => void;
 
@@ -89,6 +95,11 @@ export const useViewerStore = create<ViewerStore>((set) => ({
 
   fpsStats: null,
   setFpsStats: (fpsStats) => set({ fpsStats }),
+
+  cubeAligned: false,
+  cubeHover: false,
+  setCubeAligned: (cubeAligned) => set({ cubeAligned }),
+  setCubeHover: (cubeHover) => set({ cubeHover }),
 
   panelOpen: true,
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),

@@ -1,5 +1,5 @@
 import { Viewport } from "./components/Viewport";
-import { CubeNavBackdrop } from "./components/CubeNavBackdrop";
+import { CubeArrows } from "./components/CubeArrows";
 import { TopBar } from "./components/TopBar";
 import { ControlPanel } from "./components/panel/ControlPanel";
 import { DropZone } from "./components/DropZone";
@@ -14,7 +14,7 @@ export default function App() {
   return (
     <>
       <Viewport />
-      <CubeNavBackdrop />
+      <CubeArrows />
       <TopBar />
       <ControlPanel />
       <DropZone />

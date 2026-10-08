@@ -29,7 +29,7 @@ export function HologramSection() {
         format={(v) => v.toFixed(2)}
         onChange={(v) => update("opacity", v)}
       />
-      <Slider
+      {/* <Slider
         id="holoRim"
         label="Viền sáng (rim)"
         min={0.5}
@@ -38,8 +38,8 @@ export function HologramSection() {
         value={h.rimPower}
         format={(v) => v.toFixed(1)}
         onChange={(v) => update("rimPower", v)}
-      />
-      <Slider
+      /> */}
+      {/* <Slider
         id="holoBloom"
         label="Bloom"
         min={0}
@@ -78,16 +78,16 @@ export function HologramSection() {
         value={h.flickerIntensity}
         format={(v) => v.toFixed(2)}
         onChange={(v) => update("flickerIntensity", v)}
-      />
+      /> */}
       <CheckboxRow id="holoGrid" label="Lưới nền (grid)" checked={h.showGrid} onChange={(v) => update("showGrid", v)} />
-      <CheckboxRow id="holoEdges" label="Đường viền cạnh" checked={h.showEdges} onChange={(v) => update("showEdges", v)} />
-      <CheckboxRow
+      {/* <CheckboxRow id="holoEdges" label="Đường viền cạnh" checked={h.showEdges} onChange={(v) => update("showEdges", v)} /> */}
+      {/* <CheckboxRow
         id="holoPrepass"
         label="Chỉ phát sáng mặt gần"
         hint="Tắt = nhìn xuyên (X-ray)"
         checked={h.depthPrepass}
         onChange={(v) => update("depthPrepass", v)}
-      />
+      /> */}
     </Section>
   );
 }

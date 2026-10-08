@@ -15,8 +15,12 @@ import { HologramEffects } from "./hologram/HologramEffects";
 import { HOLOGRAM_COLORS } from "./hologram/palette";
 import { useHologramMode } from "./hologram/useHologramMode";
 import { FpsMeter } from "./FpsMeter";
+import { registerCubeApi } from "./cubeApi";
 import { registerViewerApi } from "./viewerApi";
 import { SceneRuntimeContext, useSceneRuntime, type SceneRuntime } from "./runtime";
+
+/** Duration of the eased camera move after a view-cube click. */
+const CUBE_SNAP_MS = 450;
 
 const INITIAL_FRAME: FrameInfo = { radius: 5, center: [0, 0, 0], minY: 0 };
 
@@ -131,6 +135,22 @@ function Lights({ frame }: { frame: FrameInfo }) {
   useEffect(() => {
     gl.shadowMap.enabled = showShadows;
   }, [gl, showShadows]);
+
+  // The shadow map only depends on the sun, the model's geometry and what is hidden — none of
+  // which change while orbiting. Render it once per change instead of every frame (it would
+  // otherwise draw the whole model a second time per frame).
+  const stats = useViewerStore((s) => s.stats);
+  const hasHidden = useViewerStore((s) => s.hasHidden);
+  const { doubleSided, upAxis, flipX, flipZ, spin180 } = settings;
+  useEffect(() => {
+    gl.shadowMap.autoUpdate = false;
+    return () => {
+      gl.shadowMap.autoUpdate = true;
+    };
+  }, [gl]);
+  useEffect(() => {
+    gl.shadowMap.needsUpdate = true;
+  }, [gl, showShadows, sunAngle, frame, stats, hasHidden, doubleSided, upAxis, flipX, flipZ, spin180]);
 
   const r = frame.radius;
   const angle = (sunAngle * Math.PI) / 180;
@@ -428,31 +448,84 @@ function CubeGizmo() {
   const cube = useMemo(() => new CubeNavigator(), []);
   useEffect(() => () => cube.dispose(), [cube]);
 
+  // Camera move started by a cube click: eased rotation around the orbit target.
+  const anim = useRef<{
+    start: number;
+    q: THREE.Quaternion;
+    startDir: THREE.Vector3;
+    startUp: THREE.Vector3;
+    endUp: THREE.Vector3;
+    center: THREE.Vector3;
+    dist: number;
+  } | null>(null);
+
   useEffect(() => {
     let cubePointerDown: { x: number; y: number } | null = null;
 
-    const snapView = (dirWorld: THREE.Vector3) => {
+    /** Snaps to look at the target from `dirWorld` (target -> eye). `upOverride` is used by the arrow buttons. */
+    const snapView = (dirWorld: THREE.Vector3, upOverride?: THREE.Vector3) => {
       const controls = rt.controls;
       if (!controls) return;
       const camera = store.getState().camera;
       const center = controls.target.clone();
       const dist = Math.max(camera.position.distanceTo(center), rt.frame.radius * 2.2, 1);
       const d = dirWorld.clone().normalize();
-      let up = new THREE.Vector3(0, 1, 0);
-      if (Math.abs(d.y) > 0.98) up = new THREE.Vector3(0, 0, d.y > 0 ? -1 : 1);
-      camera.up.copy(up);
-      camera.position.copy(center).addScaledVector(d, dist);
-      camera.lookAt(center);
-      controls.update();
+      let up = upOverride?.clone() ?? new THREE.Vector3(0, 1, 0);
+      if (!upOverride && Math.abs(d.y) > 0.98) up = new THREE.Vector3(0, 0, d.y > 0 ? -1 : 1);
+      const startDir = camera.position.clone().sub(center).normalize();
+      anim.current = {
+        start: performance.now(),
+        q: new THREE.Quaternion().setFromUnitVectors(startDir, d),
+        startDir,
+        startUp: camera.up.clone(),
+        endUp: up,
+        center,
+        dist,
+      };
     };
+
+    /** Arrow buttons: move to the face next to the current one, in the given screen direction. */
+    const step = (dir: "up" | "down" | "left" | "right") => {
+      const controls = rt.controls;
+      const face = cube.alignedFace;
+      if (!controls || !face || anim.current) return;
+      const camera = store.getState().camera;
+      const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+      const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+      let target: THREE.Vector3;
+      let nextUp: THREE.Vector3;
+      if (dir === "up") {
+        target = up;
+        nextUp = face.clone().negate();
+      } else if (dir === "down") {
+        target = up.clone().negate();
+        nextUp = face.clone();
+      } else if (dir === "left") {
+        target = right.clone().negate();
+        nextUp = up;
+      } else {
+        target = right;
+        nextUp = up;
+      }
+      // Snap to the nearest world axis so the result is exactly a face view.
+      const axis = new THREE.Vector3(Math.round(target.x), Math.round(target.y), Math.round(target.z));
+      if (axis.lengthSq() !== 1) return;
+      // Side faces keep the model upright; top/bottom keep the up from the arrow direction.
+      if (axis.y === 0) nextUp = new THREE.Vector3(0, 1, 0);
+      snapView(axis, nextUp);
+    };
+    registerCubeApi(step);
 
     // Intercepted in the CAPTURE phase on `window` (an ancestor of the
     // canvas), which fires before OrbitControls' own listener on the canvas —
     // stopping propagation keeps a click on the gizmo from starting a drag.
     const onPointerDownCapture = (e: PointerEvent) => {
+      if ((e.target as Element | null)?.closest?.(".cube-arrow")) return;
       if (e.button === 0 && cube.isOver(e.clientX, e.clientY)) {
         e.stopPropagation();
         cubePointerDown = { x: e.clientX, y: e.clientY };
+      } else {
+        anim.current = null; // the user took over the camera
       }
     };
     const onPointerUp = (e: PointerEvent) => {
@@ -468,17 +541,41 @@ function CubeGizmo() {
     const onPointerMove = (e: PointerEvent) => {
       cube.setHover(cube.pick(e.clientX, e.clientY));
       gl.domElement.style.cursor = cube.isHovering ? "pointer" : "";
+      const over = cube.isOver(e.clientX, e.clientY);
+      if (useViewerStore.getState().cubeHover !== over) useViewerStore.getState().setCubeHover(over);
     };
 
     window.addEventListener("pointerdown", onPointerDownCapture, true);
     window.addEventListener("pointerup", onPointerUp);
     window.addEventListener("pointermove", onPointerMove);
     return () => {
+      registerCubeApi(null);
       window.removeEventListener("pointerdown", onPointerDownCapture, true);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointermove", onPointerMove);
     };
   }, [cube, gl, rt, store]);
+
+  useFrame(({ camera }) => {
+    const a = anim.current;
+    const controls = rt.controls;
+    if (!a) return;
+    if (!controls) {
+      anim.current = null;
+      return;
+    }
+    const t = Math.min((performance.now() - a.start) / CUBE_SNAP_MS, 1);
+    const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    const q = new THREE.Quaternion().slerp(a.q, e);
+    const dir = a.startDir.clone().applyQuaternion(q);
+    const up = a.startUp.clone().lerp(a.endUp, e);
+    if (up.lengthSq() < 1e-6) up.copy(a.endUp);
+    camera.up.copy(up.normalize());
+    camera.position.copy(a.center).addScaledVector(dir, a.dist);
+    camera.lookAt(a.center);
+    controls.update();
+    if (t >= 1) anim.current = null;
+  });
 
   // gl.info resets on every render() call; reset manually so the main pass's
   // numbers can be captured before the gizmo pass adds its own.
@@ -508,6 +605,8 @@ function CubeGizmo() {
     rt.mainRender.calls = gl.info.render.calls;
     rt.mainRender.triangles = gl.info.render.triangles;
     cube.syncToCamera(camera);
+    const aligned = cube.alignedFace !== null;
+    if (useViewerStore.getState().cubeAligned !== aligned) useViewerStore.getState().setCubeAligned(aligned);
     cube.render(gl);
   }, 2);
 

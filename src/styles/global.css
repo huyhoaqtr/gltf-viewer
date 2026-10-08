@@ -520,13 +520,85 @@ select {
   gap: 8px;
 }
 
-/* Cube navigator backdrop (the gizmo itself is drawn into the WebGL canvas) */
-.cube-nav-backdrop {
+/* View cube arrow buttons (the cube itself is drawn into the WebGL canvas) */
+.cube-arrows {
   position: fixed;
   z-index: 12;
   pointer-events: none;
-  border-radius: 16px;
-  background: radial-gradient(circle at 50% 42%, rgba(20, 22, 26, 0.32), rgba(20, 22, 26, 0) 72%);
+}
+.cube-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  opacity: 0;
+  pointer-events: none;
+  cursor: pointer;
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.25));
+  transition: opacity 0.18s ease, transform 0.15s ease;
+}
+.cube-arrows.show .cube-arrow {
+  opacity: 0.55;
+  pointer-events: auto;
+}
+.cube-arrows.show .cube-arrow:hover {
+  opacity: 1;
+}
+/* Inward-pointing triangles, drawn with borders; the hit area is padded by an invisible ::after. */
+.cube-arrow::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+.cube-arrow.up {
+  top: 2px;
+  left: 50%;
+  margin-left: -7px;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 11px solid #64748b;
+}
+.cube-arrow.down {
+  bottom: 2px;
+  left: 50%;
+  margin-left: -7px;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-bottom: 11px solid #64748b;
+}
+.cube-arrow.left {
+  left: 2px;
+  top: 50%;
+  margin-top: -7px;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-left: 11px solid #64748b;
+}
+.cube-arrow.right {
+  right: 2px;
+  top: 50%;
+  margin-top: -7px;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  border-right: 11px solid #64748b;
+}
+.cube-arrow.up:hover {
+  border-top-color: var(--accent);
+  transform: scale(1.15);
+}
+.cube-arrow.down:hover {
+  border-bottom-color: var(--accent);
+  transform: scale(1.15);
+}
+.cube-arrow.left:hover {
+  border-left-color: var(--accent);
+  transform: scale(1.15);
+}
+.cube-arrow.right:hover {
+  border-right-color: var(--accent);
+  transform: scale(1.15);
 }
 
 /* Drop zone */

@@ -15,7 +15,7 @@ export const SELECTION_COLOR = 0xff9800;
 export const CUBE_NAV = {
   marginX: 18,
   marginTop: 68,
-  size: 108,
+  size: 132,
 } as const;
 
 /** Hologram mode skips the edges overlay on models heavier than this. */
