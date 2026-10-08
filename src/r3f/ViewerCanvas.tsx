@@ -14,7 +14,10 @@ export function ViewerCanvas() {
     <Canvas
       shadows="soft"
       dpr={antialias ? supersampledDpr() : [1, 2]}
-      gl={{ antialias: true, preserveDrawingBuffer: true }}
+      // While the camera moves the resolution drops to `min` x dpr, then returns after `debounce` ms.
+      performance={{ min: 0.5, debounce: 250 }}
+      // "high-performance" asks dual-GPU laptops for the discrete GPU instead of the integrated one.
+      gl={{ antialias: true, powerPreference: "high-performance" }}
       camera={{ fov: 45, near: 0.01, far: 5000, position: [4, 3, 6] }}
     >
       <ViewerScene />

@@ -211,7 +211,62 @@ function Ground({ frame }: { frame: FrameInfo }) {
 
 function Controls() {
   const rt = useSceneRuntime();
+  const store = useStore();
   const [controls, setControls] = useState<OrbitControlsImpl | null>(null);
+
+  // Lighten the scene (edges off, fewer parts) only while the user is really moving the camera.
+  // OrbitControls' own start/end events fire for plain clicks too, so they can't be used. Instead:
+  // a press that never travels more than a few pixels is a click and never lightens the scene;
+  // a real drag or a wheel gesture does, until the camera has settled (there is no damping, so
+  // it stops with the gesture, apart from a short grace for the next "change" event to arrive).
+  useEffect(() => {
+    if (!controls) return;
+    const dom = controls.domElement as HTMLElement;
+    const DRAG_THRESHOLD_PX = 4;
+    const SETTLE_MS = 200;
+    let down: { x: number; y: number } | null = null;
+    let dragged = false;
+    let lightUntil = 0; // performance.now() before which camera "change" events lighten the scene
+
+    const onPointerDown = (e: PointerEvent) => {
+      down = { x: e.clientX, y: e.clientY };
+      dragged = false;
+      lightUntil = 0; // a new press: treat as a click until it proves to be a drag
+      rt.controller?.endInteraction(0); // a click should see the full-detail model right away
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!down || dragged) return;
+      if (Math.hypot(e.clientX - down.x, e.clientY - down.y) > DRAG_THRESHOLD_PX) {
+        dragged = true;
+        lightUntil = Infinity;
+      }
+    };
+    const onPointerUp = () => {
+      if (down && dragged) lightUntil = performance.now() + SETTLE_MS;
+      down = null;
+    };
+    const onWheel = () => {
+      lightUntil = performance.now() + SETTLE_MS;
+    };
+    const onChange = () => {
+      if (performance.now() >= lightUntil || !useViewerStore.getState().settings.lodWhileMoving) return;
+      rt.controller?.pulseInteraction();
+      store.getState().performance.regress(); // lower render resolution until idle (Canvas `performance`)
+    };
+
+    dom.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    dom.addEventListener("wheel", onWheel, { passive: true });
+    controls.addEventListener("change", onChange);
+    return () => {
+      dom.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      dom.removeEventListener("wheel", onWheel);
+      controls.removeEventListener("change", onChange);
+    };
+  }, [controls, rt, store]);
 
   useEffect(() => {
     rt.controls = controls;
@@ -235,8 +290,6 @@ function Controls() {
     <OrbitControls
       ref={setControls}
       makeDefault
-      enableDamping
-      dampingFactor={0.08}
       screenSpacePanning
       minDistance={0.01}
       maxDistance={5000}
@@ -574,6 +627,7 @@ function CubeGizmo() {
     camera.position.copy(a.center).addScaledVector(dir, a.dist);
     camera.lookAt(a.center);
     controls.update();
+    rt.controller?.pulseInteraction();
     if (t >= 1) anim.current = null;
   });
 

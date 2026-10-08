@@ -26,6 +26,8 @@ export interface ViewerSettings {
   /** Supersampling: renders at a higher resolution, then downsamples. Smoother thin lines, heavier on the GPU. */
   antialias: boolean;
   showFps: boolean;
+  /** While the camera moves, draw only the largest parts of the model. */
+  lodWhileMoving: boolean;
   background: string;
   cameraMode: CameraMode;
   /** Selection outline colour (CSS hex). */
@@ -84,6 +86,7 @@ export const DEFAULT_SETTINGS: ViewerSettings = {
   autoRotate: false,
   antialias: false,
   showFps: true,
+  lodWhileMoving: true,
   background: SKY_BACKGROUND_HEX,
   cameraMode: "persp",
   selectionColor: "#ff9800",

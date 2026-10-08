@@ -28,6 +28,13 @@ export function DisplaySection() {
         onChange={(v) => updateSetting("showShadows", v)}
       />
       <CheckboxRow
+        id="lodWhileMoving"
+        label="Giảm chi tiết khi xoay"
+        hint="Lúc kéo/zoom: giảm độ phân giải, chỉ vẽ bộ phận lớn (viền cạnh vẫn giữ)"
+        checked={settings.lodWhileMoving}
+        onChange={(v) => updateSetting("lodWhileMoving", v)}
+      />
+      <CheckboxRow
         id="showFps"
         label="Hiển thị FPS"
         checked={settings.showFps}

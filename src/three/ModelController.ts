@@ -107,6 +107,7 @@ export class ModelController {
 
   dispose() {
     this.disposed = true;
+    clearTimeout(this.interactionTimer);
     this.clearModel();
     this.edgesBuilder.destroyWorkers();
   }
@@ -232,9 +233,51 @@ export class ModelController {
   }
 
   private updateEdgeVisibility() {
+    const show = this.deps.getEdgesEnabled();
     this.edgesBuilder.lines.forEach((line) => {
-      line.visible = this.deps.getEdgesEnabled() && !!line.parent && line.parent.visible;
+      line.visible = show && !!line.parent && line.parent.visible;
     });
+  }
+
+  // While the camera moves: fewer parts are drawn (see applyInteractionLod). Edges always stay visible.
+  private interacting = false;
+  private interactionTimer: ReturnType<typeof setTimeout> | undefined;
+
+  beginInteraction() {
+    clearTimeout(this.interactionTimer);
+    if (this.interacting) return;
+    this.interacting = true;
+    this.applyInteractionLod(true);
+  }
+
+  /** While moving, draw only each batch's largest parts (cheap LOD); draw everything again when settled. */
+  private applyInteractionLod(active: boolean) {
+    const enabled = active && this.deps.getSettings().lodWhileMoving;
+    for (const batch of this.mergedBatches) {
+      batch.mesh.geometry.setDrawRange(0, enabled ? batch.lodIndexCount : Infinity);
+      // Edges stay visible, but only those of the parts still being drawn (parts and edge ranges share order).
+      const edges = batch.edges;
+      if (!edges) continue;
+      let kept = 0;
+      while (kept < batch.parts.length && batch.parts[kept].indexStart + batch.parts[kept].indexCount <= batch.lodIndexCount) kept++;
+      const last = edges.ranges[Math.max(kept, 1) - 1];
+      edges.line.geometry.setDrawRange(0, enabled && last ? last.indexStart + last.indexCount : Infinity);
+    }
+  }
+
+  /** The camera stopped (or is about to): restore the overlay after a short grace period for damping. */
+  endInteraction(delayMs = 250) {
+    clearTimeout(this.interactionTimer);
+    this.interactionTimer = setTimeout(() => {
+      this.interacting = false;
+      this.applyInteractionLod(false);
+    }, delayMs);
+  }
+
+  /** For camera moves with no start/end events (e.g. the view-cube animation). */
+  pulseInteraction() {
+    this.beginInteraction();
+    this.endInteraction();
   }
 
   // Starting the edges build right when a model finishes loading means its
@@ -356,6 +399,8 @@ export class ModelController {
       -((clientY - rect.top) / rect.height) * 2 + 1
     );
     this.raycaster.setFromCamera(ndc, this.deps.getCamera());
+    // A click also fires the camera start/end events; picking must see every part, not just the LOD subset.
+    this.applyInteractionLod(false);
     const hits = this.raycaster.intersectObject(this.currentRoot, true);
     this.selection.pickFromRaycast(hits);
   }

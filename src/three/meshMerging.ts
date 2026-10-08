@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { INTERACTION_LOD_TRIANGLE_RATIO, MERGE_CHUNK_MAX_TRIANGLES } from "./constants";
 
 type LineArtKind = "line" | "lineSegments" | "points";
 type LineArtObject = THREE.Line | THREE.LineSegments | THREE.Points;
@@ -76,7 +77,10 @@ export interface MergedBatchEdges {
 export interface MergedBatch {
   mesh: THREE.Mesh;
   pristineIndex: Uint16Array | Uint32Array;
+  /** Parts are stored largest-first. */
   parts: MergedPart[];
+  /** Index count of the largest-parts prefix drawn while the camera moves (see INTERACTION_LOD_TRIANGLE_RATIO). */
+  lodIndexCount: number;
   edges?: MergedBatchEdges;
 }
 
@@ -129,6 +133,67 @@ function tagLogicalGroups(root: THREE.Object3D) {
   });
 }
 
+/** Meshes ordered by the diagonal of their bounds in root space, biggest first. */
+function sortLargestFirst(meshes: THREE.Mesh[], rootInverse: THREE.Matrix4): THREE.Mesh[] {
+  const box = new THREE.Box3();
+  const local = new THREE.Matrix4();
+  const size = new THREE.Vector3();
+  const keyed = meshes.map((mesh) => {
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    local.multiplyMatrices(rootInverse, mesh.matrixWorld);
+    box.copy(mesh.geometry.boundingBox!).applyMatrix4(local);
+    return { mesh, extent: box.getSize(size).length() };
+  });
+  return keyed.sort((a, b) => b.extent - a.extent).map((k) => k.mesh);
+}
+
+function triangleCount(geo: THREE.BufferGeometry): number {
+  return (geo.index ? geo.index.count : geo.attributes.position.count) / 3;
+}
+
+/**
+ * Splits meshes (all sharing one material) into spatially compact chunks of roughly
+ * MERGE_CHUNK_MAX_TRIANGLES triangles each, by recursively cutting along the longest
+ * axis of the parts' centres at the triangle-count median (a k-d split). One batch
+ * per material would span the whole model and never be frustum-culled; chunks are.
+ * A single mesh bigger than the limit stays whole.
+ */
+function splitIntoSpatialChunks(meshes: THREE.Mesh[], rootInverse: THREE.Matrix4): THREE.Mesh[][] {
+  const box = new THREE.Box3();
+  const local = new THREE.Matrix4();
+  const items = meshes.map((mesh) => {
+    if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+    local.multiplyMatrices(rootInverse, mesh.matrixWorld);
+    box.copy(mesh.geometry.boundingBox!).applyMatrix4(local);
+    return { mesh, tris: triangleCount(mesh.geometry), centre: box.getCenter(new THREE.Vector3()) };
+  });
+
+  const chunks: THREE.Mesh[][] = [];
+  const split = (list: typeof items, total: number) => {
+    if (total <= MERGE_CHUNK_MAX_TRIANGLES || list.length < 2) {
+      chunks.push(list.map((i) => i.mesh));
+      return;
+    }
+    const bounds = new THREE.Box3();
+    list.forEach((i) => bounds.expandByPoint(i.centre));
+    const size = bounds.getSize(new THREE.Vector3());
+    const axis = size.x >= size.y && size.x >= size.z ? "x" : size.y >= size.z ? "y" : "z";
+    const sorted = [...list].sort((a, b) => a.centre[axis] - b.centre[axis]);
+
+    let acc = 0;
+    let cut = 0;
+    while (cut < sorted.length - 1 && acc + sorted[cut].tris <= total / 2) acc += sorted[cut++].tris;
+    if (cut === 0) {
+      acc = sorted[0].tris; // first part alone is over half: still must make progress
+      cut = 1;
+    }
+    split(sorted.slice(0, cut), acc);
+    split(sorted.slice(cut), total - acc);
+  };
+  split(items, items.reduce((sum, i) => sum + i.tris, 0));
+  return chunks;
+}
+
 /**
  * Folds every eligible mesh sharing the same material into one big mesh per
  * material (BIM/CAD exports with no grouping can have tens of thousands of
@@ -172,8 +237,9 @@ export function mergeMeshesByMaterial(
   const batches: MergedBatch[] = [];
   const meshToPart = new Map<THREE.Mesh, { batch: MergedBatch; part: MergedPart }>();
 
-  groups.forEach((meshes, material) => {
-    if (meshes.length < 2) return; // nothing to gain merging a single mesh
+  const mergeChunk = (chunk: THREE.Mesh[], material: THREE.Material) => {
+    // Largest parts first, so a prefix of the index buffer is a cheap level of detail.
+    const meshes = sortLargestFirst(chunk, rootInverse);
 
     const transformed = meshes.map((mesh) => {
       const local = new THREE.Matrix4().multiplyMatrices(rootInverse, mesh.matrixWorld);
@@ -244,6 +310,14 @@ export function mergeMeshesByMaterial(
       cursor += count;
     });
 
+    // Longest prefix of whole parts within the LOD budget (at least the first part).
+    let lodIndexCount = parts[0].indexCount;
+    for (let i = 1; i < parts.length; i++) {
+      const end = parts[i].indexStart + parts[i].indexCount;
+      if (end > cursor * INTERACTION_LOD_TRIANGLE_RATIO) break;
+      lodIndexCount = end;
+    }
+
     const mergedMesh = new THREE.Mesh(merged, material);
     mergedMesh.castShadow = true;
     mergedMesh.receiveShadow = true;
@@ -255,6 +329,7 @@ export function mergeMeshesByMaterial(
       mesh: mergedMesh,
       pristineIndex: (merged.index.array as Uint16Array | Uint32Array).slice() as Uint16Array | Uint32Array,
       parts,
+      lodIndexCount,
     };
     mergedMesh.userData.mergedBatch = batch;
     batches.push(batch);
@@ -264,11 +339,17 @@ export function mergeMeshesByMaterial(
       mesh.parent?.remove(mesh);
       mesh.geometry.dispose();
     });
+  };
+
+  groups.forEach((meshes, material) => {
+    if (meshes.length < 2) return; // nothing to gain merging a single mesh
+    // Even a one-mesh chunk goes through here, so it still gets a bounds tree for fast picking.
+    splitIntoSpatialChunks(meshes, rootInverse).forEach((chunk) => mergeChunk(chunk, material));
   });
 
   if (batches.length > 0) {
     const originalCount = batches.reduce((sum, b) => sum + b.parts.length, 0);
-    console.log(`[merge] ${originalCount} mesh → ${batches.length} draw call (theo material)`);
+    console.log(`[merge] ${originalCount} mesh → ${batches.length} draw call (theo vật liệu, chia khối không gian để culling)`);
   }
 
   return { batches, meshToPart };
