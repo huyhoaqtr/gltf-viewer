@@ -38,14 +38,13 @@ function patchContrast(m: THREE.Material) {
 }
 
 export interface MaterialStyleOptions {
-  roughnessFloor: number;
   flattenMetal: boolean;
   doubleSided: boolean;
 }
 
 /**
  * Pushes every mesh's material toward a flatter, more "architectural" look
- * (higher roughness floor, near-zero metalness) instead of raw PBR values
+ * (near-zero metalness, the file's own roughness) instead of raw PBR values
  * some exporters ship, and applies the double-sided fallback for BIM/CAD
  * parts with inverted normals.
  */
@@ -62,8 +61,10 @@ export function applyMaterialStyle(root: THREE.Object3D, opts: MaterialStyleOpti
       if (m.userData.isHologram) return;
       const std = m as THREE.MeshStandardMaterial;
       if ((std as THREE.MeshStandardMaterial).isMeshStandardMaterial || (std as THREE.MeshPhysicalMaterial).isMeshPhysicalMaterial) {
-        std.roughness = Math.max(std.roughness ?? 1, opts.roughnessFloor);
-        if (opts.flattenMetal) std.metalness = Math.min(std.metalness ?? 0, 0.05);
+        // Metalness is derived from the file's own value: the style is re-applied whenever a setting
+        // changes, so working from the already-restyled value would make "flatten metal" one-way.
+        const origMetalness = (std.userData.styleOriginalMetalness ??= std.metalness ?? 0) as number;
+        std.metalness = opts.flattenMetal ? Math.min(origMetalness, 0.05) : origMetalness;
         std.envMapIntensity = 0.35;
       }
       patchContrast(m);

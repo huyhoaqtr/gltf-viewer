@@ -334,12 +334,12 @@ export class ModelController {
   // ---------------------------------------------------------------------
 
   private styleOptions() {
-    const { roughnessFloor, flattenMetal, doubleSided } = this.deps.getSettings();
-    return { roughnessFloor, flattenMetal, doubleSided };
+    const { flattenMetal, doubleSided } = this.deps.getSettings();
+    return { flattenMetal, doubleSided };
   }
 
-  // The roughness slider fires "input" continuously while dragging (much
-  // faster than 60/sec on some devices); applyMaterialStyle() walks every
+  // Material settings can fire continuously (much faster than 60/sec on some
+  // devices); applyMaterialStyle() walks every
   // mesh in the model, which is expensive on models with hundreds of parts.
   // Coalesce repeated calls into at most one pass per animation frame.
   scheduleRestyle() {

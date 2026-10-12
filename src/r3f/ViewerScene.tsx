@@ -357,7 +357,7 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
   const onFrameRef = useRef(onFrame);
   onFrameRef.current = onFrame;
 
-  const { roughnessFloor, flattenMetal, doubleSided, upAxis, flipX, flipZ, spin180 } = useViewerStore(
+  const { flattenMetal, doubleSided, upAxis, flipX, flipZ, spin180 } = useViewerStore(
     (s) => s.settings
   );
   const edgesEnabled = useViewerStore(selectEdgesEnabled);
@@ -437,7 +437,7 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
 
   useEffect(() => {
     rt.controller?.scheduleRestyle();
-  }, [rt, roughnessFloor, flattenMetal, doubleSided]);
+  }, [rt, flattenMetal, doubleSided]);
 
   const { selectionColor, selectionFillColor } = useViewerStore((s) => s.settings);
   useEffect(() => {

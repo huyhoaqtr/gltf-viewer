@@ -13,7 +13,6 @@ export interface ViewerSettings {
   exposure: number;
   contrast: number;
   sunAngle: number;
-  roughnessFloor: number;
   flattenMetal: boolean;
   doubleSided: boolean;
   upAxis: UpAxis;
@@ -78,7 +77,6 @@ export const DEFAULT_SETTINGS: ViewerSettings = {
   exposure: 1,
   contrast: 1.5,
   sunAngle: 195,
-  roughnessFloor: 0.55,
   flattenMetal: true,
   doubleSided: true,
   upAxis: "z",
