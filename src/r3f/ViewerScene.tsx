@@ -451,6 +451,23 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
     rt.controller?.setShowEdges(edgesEnabled);
   }, [rt, edgesEnabled]);
 
+  const showModelLines = useViewerStore((s) => s.settings.showModelLines);
+  useEffect(() => {
+    rt.controller?.setModelLinesVisible(showModelLines);
+  }, [rt, showModelLines]);
+
+  // Re-extract edges when the angle threshold changes (debounced while the slider is dragged).
+  const edgeAngle = useViewerStore((s) => s.settings.edgeAngle);
+  const firstEdgeAngle = useRef(true);
+  useEffect(() => {
+    if (firstEdgeAngle.current) {
+      firstEdgeAngle.current = false;
+      return;
+    }
+    const id = setTimeout(() => rt.controller?.rebuildEdges(), 400);
+    return () => clearTimeout(id);
+  }, [rt, edgeAngle]);
+
   return <group ref={pivotRef} />;
 }
 

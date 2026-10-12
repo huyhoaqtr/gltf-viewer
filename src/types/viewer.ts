@@ -21,6 +21,10 @@ export interface ViewerSettings {
   flipZ: boolean;
   spin180: boolean;
   showEdges: boolean;
+  /** Line geometry shipped inside the glTF itself (CAD/BIM outlines), not the viewer's own edges overlay. */
+  showModelLines: boolean;
+  /** Minimum angle (degrees) between two faces for their shared edge to be drawn. Higher = fewer edges on curved surfaces. */
+  edgeAngle: number;
   showShadows: boolean;
   autoRotate: boolean;
   /** Supersampling: renders at a higher resolution, then downsamples. Smoother thin lines, heavier on the GPU. */
@@ -82,11 +86,13 @@ export const DEFAULT_SETTINGS: ViewerSettings = {
   flipZ: false,
   spin180: false,
   showEdges: true,
+  showModelLines: false,
+  edgeAngle: 35,
   showShadows: true,
   autoRotate: false,
   antialias: false,
   showFps: true,
-  lodWhileMoving: true,
+  lodWhileMoving: false,
   background: SKY_BACKGROUND_HEX,
   cameraMode: "persp",
   selectionColor: "#ff9800",

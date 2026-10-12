@@ -1,6 +1,7 @@
 import { useViewerStore } from "../../state/viewerStore";
 import { Section } from "./Section";
 import { CheckboxRow } from "./CheckboxRow";
+import { Slider } from "./Slider";
 
 export function DisplaySection() {
   const settings = useViewerStore((s) => s.settings);
@@ -14,6 +15,25 @@ export function DisplaySection() {
         checked={settings.showEdges}
         onChange={(v) => updateSetting("showEdges", v)}
       />
+      <CheckboxRow
+        id="showModelLines"
+        label="Đường nét có sẵn trong file"
+        hint="Đường kẻ do file xuất sẵn, không phải viền cạnh"
+        checked={settings.showModelLines}
+        onChange={(v) => updateSetting("showModelLines", v)}
+      />
+      {settings.showEdges && (
+        <Slider
+          id="edgeAngle"
+          label="Lọc cạnh cong (góc tối thiểu)"
+          min={5}
+          max={80}
+          step={5}
+          value={settings.edgeAngle}
+          format={(v) => `${v}°`}
+          onChange={(v) => updateSetting("edgeAngle", v)}
+        />
+      )}
       <CheckboxRow
         id="antialias"
         label="Khử răng cưa"

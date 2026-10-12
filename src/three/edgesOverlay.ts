@@ -2,7 +2,6 @@ import * as THREE from "three";
 import {
   EDGE_BUILD_FRAME_BUDGET_MS,
   EDGE_COLOR,
-  EDGE_THRESHOLD_ANGLE,
   EDGE_WORKER_BATCH_MESH_COUNT,
   EDGE_WORKER_BATCH_VERTEX_COUNT,
   EDGE_WORKER_POOL_MAX,
@@ -69,6 +68,8 @@ export class EdgesOverlayBuilder {
   built = false;
 
   private token = 0;
+  /** Minimum angle between faces for an edge to be drawn; set per build. */
+  private thresholdDeg = 35;
   private material: THREE.LineBasicMaterial | null = null;
   private styleOverride: EdgeStyle | null = null;
   private workers: Worker[] = [];
@@ -105,6 +106,17 @@ export class EdgesOverlayBuilder {
     m.blending = s ? s.blending : THREE.NormalBlending;
   }
 
+  /** Drops the built edges (and any build in progress) so the next build starts fresh. */
+  clear() {
+    this.cancel();
+    this.lines.forEach((line) => {
+      line.parent?.remove(line);
+      line.geometry.dispose();
+    });
+    this.lines = [];
+    this.built = false;
+  }
+
   /** Cancels any build currently in progress without disposing state. */
   cancel() {
     this.token++;
@@ -116,7 +128,8 @@ export class EdgesOverlayBuilder {
     this.currentBatchAccum.clear();
   }
 
-  build(root: THREE.Object3D, onProgress?: () => void) {
+  build(root: THREE.Object3D, onProgress?: () => void, thresholdDeg = this.thresholdDeg) {
+    this.thresholdDeg = thresholdDeg;
     this.token++;
     const token = this.token;
     // Drop any lines from a previous build of this same model — otherwise
@@ -247,7 +260,7 @@ export class EdgesOverlayBuilder {
     if (this.currentNextBatchIndex >= this.currentBatches.length) return;
     const batch = this.currentBatches[this.currentNextBatchIndex++];
     const items = batch.map((j) => ({ id: j.id, position: j.position, index: j.index }));
-    worker.postMessage({ token: this.token, items, threshold: EDGE_THRESHOLD_ANGLE });
+    worker.postMessage({ token: this.token, items, threshold: this.thresholdDeg });
   }
 
   private handleWorkerMessage(worker: Worker, e: MessageEvent<WorkerResponse>) {
@@ -368,11 +381,11 @@ export class EdgesOverlayBuilder {
             const position = geo.attributes.position?.array as Float32Array | undefined;
             if (!position) throw new Error("mesh has no position attribute");
             const index = (geo.index?.array as Uint16Array | Uint32Array | undefined) ?? null;
-            const positions = extractEdgeSegments(position, index, EDGE_THRESHOLD_ANGLE);
+            const positions = extractEdgeSegments(position, index, this.thresholdDeg);
             this.attachMeshLine(target.mesh, positions);
           } else {
             const extracted = extractPartIndexed(target.batch, target.batch.parts[target.partIndex]);
-            const positions = extractEdgeSegments(extracted.position, extracted.index, EDGE_THRESHOLD_ANGLE);
+            const positions = extractEdgeSegments(extracted.position, extracted.index, this.thresholdDeg);
             this.receiveBatchPart(target.batch, target.partIndex, positions);
           }
         } catch {

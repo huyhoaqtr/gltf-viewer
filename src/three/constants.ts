@@ -22,7 +22,7 @@ export const MERGE_CHUNK_MAX_TRIANGLES = 120_000;
  */
 export const INTERACTION_LOD_TRIANGLE_RATIO = 0.35;
 
-export const EDGE_THRESHOLD_ANGLE = 15; // degrees; low angles trace every subdivision seam on curved geometry
+export const EDGE_THRESHOLD_ANGLE = 35; // degrees; low angles trace every facet seam on curved surfaces (a 24-sided cylinder is 15° per facet)
 export const EDGE_COLOR = 0x1b1e20;
 export const SELECTION_COLOR = 0xff9800;
 

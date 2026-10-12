@@ -196,6 +196,7 @@ export class ModelController {
               this.scheduleEdgesBuild(root);
             }
             this.updateEdgeVisibility();
+            this.setModelLinesVisible(this.deps.getSettings().showModelLines);
             this.ready = true;
             this.hooks.afterMerge?.(root);
           }
@@ -291,7 +292,7 @@ export class ModelController {
   private scheduleEdgesBuild(root: THREE.Object3D) {
     const start = () => {
       if (this.currentRoot !== root || !this.deps.getEdgesEnabled()) return; // model changed or toggled off meanwhile
-      this.edgesBuilder.build(root, () => this.updateEdgeVisibility());
+      this.edgesBuilder.build(root, () => this.updateEdgeVisibility(), this.deps.getSettings().edgeAngle);
     };
     if (typeof requestIdleCallback === "function") {
       requestIdleCallback(start, { timeout: 1000 });
@@ -361,6 +362,32 @@ export class ModelController {
 
   setSelectionColors(edge: string, fill: string) {
     this.selection.setColors(edge, fill);
+  }
+
+  /** The edge angle setting changed: throw the built edges away and rebuild them with the new threshold. */
+  rebuildEdges() {
+    if (!this.currentRoot || !this.modelBuilder.built) return;
+    this.mergedBatches.forEach((b) => {
+      b.edges = undefined;
+    });
+    this.edgesBuilder.clear();
+    if (this.deps.getEdgesEnabled()) this.scheduleEdgesBuild(this.currentRoot);
+  }
+
+  /**
+   * Shows/hides the line geometry that ships inside the glTF (CAD/BIM exports often bake in outlines
+   * and tessellation lines), as opposed to the viewer's own edges overlay. Done through the line
+   * materials, so it survives hide/isolate/show-all toggling the objects' own `visible` flags.
+   */
+  setModelLinesVisible(visible: boolean) {
+    this.currentRoot?.traverse((obj) => {
+      const line = obj as THREE.Line;
+      if (!line.isLine || line.userData.isEdgeOverlay) return;
+      const mats = Array.isArray(line.material) ? line.material : [line.material];
+      mats.forEach((m) => {
+        m.visible = visible;
+      });
+    });
   }
 
   setShowEdges(v: boolean) {
