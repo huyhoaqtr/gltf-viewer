@@ -1,7 +1,3 @@
-const THREE_VERSION = "0.160.1";
-
-export const DRACO_DECODER_PATH = `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/examples/jsm/libs/draco/`;
-
 export const EDGE_BUILD_FRAME_BUDGET_MS = 14; 
 export const MODEL_BUILD_FRAME_BUDGET_MS = 8; 
 export const EDGE_WORKER_POOL_MAX = 18; 

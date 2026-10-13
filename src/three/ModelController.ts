@@ -2,7 +2,7 @@ import * as THREE from "three";
 import "./bvhSetup";
 import type { OrbitControls } from "three-stdlib";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
+import { BundledDRACOLoader } from "./BundledDRACOLoader";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 
 import { EdgesOverlayBuilder, type EdgeStyle } from "./edgesOverlay";
@@ -11,7 +11,6 @@ import { SelectionController } from "./selection";
 import { applyOrientation, type OrientationState } from "./orientation";
 import { applyMaterialStyle, computeStats, disposeObject3D } from "./modelStyling";
 import { mergeMeshesByMaterial, mergeLineArtByMaterial, findLineArtSiblings, type MergedBatch } from "./meshMerging";
-import { DRACO_DECODER_PATH } from "./constants";
 import type { ModelStats, ViewerSettings } from "../types/viewer";
 
 export interface ModelControllerCallbacks {
@@ -76,8 +75,7 @@ export class ModelController {
     private deps: ModelControllerDeps,
     private callbacks: ModelControllerCallbacks
   ) {
-    const dracoLoader = new DRACOLoader();
-    dracoLoader.setDecoderPath(DRACO_DECODER_PATH);
+    const dracoLoader = new BundledDRACOLoader();
     this.gltfLoader = new GLTFLoader();
     this.gltfLoader.setDRACOLoader(dracoLoader);
     this.gltfLoader.setMeshoptDecoder(MeshoptDecoder);
