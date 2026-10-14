@@ -78,10 +78,21 @@ export class EdgesOverlayBuilder {
   private currentBatches: EdgeJob[][] = [];
   private currentNextBatchIndex = 0;
   private currentPendingBatches = 0;
+  /** True while jobs are still being prepared (in time slices) for the current build. */
+  private currentPreparing = false;
+  private currentJobsTotal = 0;
+  private currentJobsDone = 0;
+  private idleWorkers = new Set<Worker>();
   private currentJobTargets = new Map<number, JobTarget>();
   private currentBatchAccum = new Map<MergedBatch, BatchAccumulator>();
   private currentOnProgress?: () => void;
   private currentStartedAt = 0;
+
+  /** Fraction (0..1) of parts whose edges have been computed in the current build. */
+  get progress(): number {
+    if (this.built) return 1;
+    return this.currentJobsTotal > 0 ? Math.min(1, this.currentJobsDone / this.currentJobsTotal) : 0;
+  }
 
   /** Starts the worker pool early (e.g. right after the viewer mounts) so its
    * one-time startup cost (spinning up each worker's module) isn't paid on
@@ -125,6 +136,7 @@ export class EdgesOverlayBuilder {
     this.currentBatches = [];
     this.currentNextBatchIndex = 0;
     this.currentPendingBatches = 0;
+    this.currentPreparing = false;
     this.currentBatchAccum.clear();
   }
 
@@ -146,6 +158,8 @@ export class EdgesOverlayBuilder {
     this.currentStartedAt = performance.now();
     this.currentOnProgress = onProgress;
     this.currentBatchAccum.clear();
+    this.currentJobsDone = 0;
+    this.currentJobsTotal = 0;
 
     const jobTargets: JobTarget[] = [];
     const seenBatches = new Set<MergedBatch>();
@@ -174,62 +188,83 @@ export class EdgesOverlayBuilder {
       });
     });
 
+    this.currentJobsTotal = jobTargets.length;
     const workers = this.ensureWorkers();
     if (workers.length === 0) {
       this.buildOnMainThread(jobTargets, token, onProgress);
       return;
     }
 
+    // Preparing a job (extracting one part's indexed geometry) is real work — for tens of
+    // thousands of parts doing it all up front froze the tab for seconds. Prepare them in
+    // time slices instead and hand each finished batch to an idle worker straight away.
     const idMap = new Map<number, JobTarget>();
-    const jobs: EdgeJob[] = [];
-    jobTargets.forEach((target, id) => {
-      let position: Float32Array | undefined;
-      let index: Uint16Array | Uint32Array | null = null;
-      if (target.kind === "mesh") {
-        position = target.mesh.geometry.attributes.position?.array as Float32Array | undefined;
-        index = (target.mesh.geometry.index?.array as Uint16Array | Uint32Array | undefined) ?? null;
-      } else {
-        // A small, properly *indexed* slice (see extractPartIndexed) — keeps
-        // shared vertices sharing an id, so the worker's edge extraction can
-        // use fast integer adjacency instead of re-hashing coordinates.
-        const extracted = extractPartIndexed(target.batch, target.batch.parts[target.partIndex]);
-        position = extracted.position;
-        index = extracted.index;
-      }
-      if (!position) return;
-      idMap.set(id, target);
-      jobs.push({ id, target, position, index });
-    });
+    this.currentJobTargets = idMap;
+    this.currentBatches = [];
+    this.currentNextBatchIndex = 0;
+    this.currentPendingBatches = 0;
+    this.currentPreparing = true;
+    this.idleWorkers = new Set(workers);
 
-    const batches: EdgeJob[][] = [];
+    let cursor = 0;
     let current: EdgeJob[] = [];
     let currentVerts = 0;
-    for (const job of jobs) {
-      const vertCount = job.position.length / 3;
-      if (
-        current.length > 0 &&
-        (current.length >= EDGE_WORKER_BATCH_MESH_COUNT || currentVerts + vertCount > EDGE_WORKER_BATCH_VERTEX_COUNT)
-      ) {
-        batches.push(current);
-        current = [];
-        currentVerts = 0;
+    const step = () => {
+      if (token !== this.token) return;
+      const deadline = performance.now() + EDGE_BUILD_FRAME_BUDGET_MS;
+      while (cursor < jobTargets.length && performance.now() < deadline) {
+        const id = cursor;
+        const target = jobTargets[cursor++];
+        let position: Float32Array | undefined;
+        let index: Uint16Array | Uint32Array | null = null;
+        if (target.kind === "mesh") {
+          position = target.mesh.geometry.attributes.position?.array as Float32Array | undefined;
+          index = (target.mesh.geometry.index?.array as Uint16Array | Uint32Array | undefined) ?? null;
+        } else {
+          // A small, properly *indexed* slice (see extractPartIndexed) — keeps
+          // shared vertices sharing an id, so the worker's edge extraction can
+          // use fast integer adjacency instead of re-hashing coordinates.
+          const extracted = extractPartIndexed(target.batch, target.batch.parts[target.partIndex]);
+          position = extracted.position;
+          index = extracted.index;
+        }
+        if (!position) continue;
+        idMap.set(id, target);
+        const vertCount = position.length / 3;
+        if (
+          current.length > 0 &&
+          (current.length >= EDGE_WORKER_BATCH_MESH_COUNT || currentVerts + vertCount > EDGE_WORKER_BATCH_VERTEX_COUNT)
+        ) {
+          this.pushBatch(current);
+          current = [];
+          currentVerts = 0;
+        }
+        current.push({ id, target, position, index });
+        currentVerts += vertCount;
       }
-      current.push(job);
-      currentVerts += vertCount;
+      if (cursor < jobTargets.length) {
+        requestAnimationFrame(step);
+        return;
+      }
+      if (current.length > 0) this.pushBatch(current);
+      this.currentPreparing = false;
+      if (this.currentPendingBatches === 0) {
+        this.built = true;
+        this.logCompletion();
+        this.currentOnProgress?.();
+      }
+    };
+    step();
+  }
+
+  /** Queues a prepared batch and wakes an idle worker for it. */
+  private pushBatch(batch: EdgeJob[]) {
+    this.currentBatches.push(batch);
+    this.currentPendingBatches++;
+    for (const worker of this.idleWorkers) {
+      if (this.currentNextBatchIndex >= this.currentBatches.length) break;
+      this.dispatchNext(worker);
     }
-    if (current.length > 0) batches.push(current);
-
-    this.currentJobTargets = idMap;
-    this.currentBatches = batches;
-    this.currentNextBatchIndex = 0;
-    this.currentPendingBatches = batches.length;
-
-    if (batches.length === 0) {
-      this.built = true;
-      return;
-    }
-
-    workers.forEach((w) => this.dispatchNext(w));
   }
 
   private ensureWorkers(): Worker[] {
@@ -243,7 +278,7 @@ export class EdgesOverlayBuilder {
         worker.onerror = (ev) => {
           console.error("[edges] worker error:", ev.message);
           this.currentPendingBatches = Math.max(0, this.currentPendingBatches - 1);
-          if (this.currentPendingBatches === 0) this.built = true;
+          if (this.currentPendingBatches === 0 && !this.currentPreparing) this.built = true;
           this.dispatchNext(worker);
         };
         this.workers.push(worker);
@@ -257,7 +292,11 @@ export class EdgesOverlayBuilder {
   }
 
   private dispatchNext(worker: Worker) {
-    if (this.currentNextBatchIndex >= this.currentBatches.length) return;
+    if (this.currentNextBatchIndex >= this.currentBatches.length) {
+      this.idleWorkers.add(worker);
+      return;
+    }
+    this.idleWorkers.delete(worker);
     const batch = this.currentBatches[this.currentNextBatchIndex++];
     const items = batch.map((j) => ({ id: j.id, position: j.position, index: j.index }));
     worker.postMessage({ token: this.token, items, threshold: this.thresholdDeg });
@@ -276,11 +315,12 @@ export class EdgesOverlayBuilder {
         }
       }
       this.currentPendingBatches--;
-      this.currentOnProgress?.();
-      if (this.currentPendingBatches === 0) {
+      this.currentJobsDone += results.length;
+      if (this.currentPendingBatches === 0 && !this.currentPreparing) {
         this.built = true;
         this.logCompletion();
       }
+      this.currentOnProgress?.();
     }
     // Free either way — if this was a stale batch, hand the worker whatever
     // is next in the CURRENT build's queue (a no-op if there is none).

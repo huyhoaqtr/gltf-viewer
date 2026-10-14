@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { INTERACTION_LOD_TRIANGLE_RATIO, MERGE_CHUNK_MAX_TRIANGLES } from "./constants";
+import { INTERACTION_LOD_TRIANGLE_RATIO, MERGE_CHUNK_MAX_TRIANGLES, MERGE_FRAME_BUDGET_MS, LINE_ART_CHUNK_OBJECTS, MERGE_WORKER_POOL_MAX } from "./constants";
 
 type LineArtKind = "line" | "lineSegments" | "points";
 type LineArtObject = THREE.Line | THREE.LineSegments | THREE.Points;
@@ -194,6 +194,144 @@ function splitIntoSpatialChunks(meshes: THREE.Mesh[], rootInverse: THREE.Matrix4
   return chunks;
 }
 
+interface WorkerAttribute {
+  name: string;
+  itemSize: number;
+  normalized: boolean;
+  array: any;
+}
+
+interface WorkerResult {
+  ok: boolean;
+  attributes: WorkerAttribute[];
+  index: Uint16Array | Uint32Array;
+  pristine: Uint16Array | Uint32Array;
+  box: number[];
+  sphere: number[];
+}
+
+/** Small pool of workers that each transform + concatenate one chunk of meshes (see mergeWorker.ts). */
+class MergeWorkerPool {
+  readonly size: number;
+  private workers: Worker[] = [];
+  private idle: Worker[] = [];
+  private pending = new Map<number, { worker: Worker; resolve: (r: WorkerResult | null) => void }>();
+  private nextId = 1;
+
+  constructor() {
+    if (typeof Worker !== "undefined") {
+      try {
+        const count = Math.max(1, Math.min((navigator.hardwareConcurrency || 4) - 1, MERGE_WORKER_POOL_MAX));
+        for (let i = 0; i < count; i++) {
+          const worker = new Worker(new URL("./mergeWorker.ts", import.meta.url), { type: "module" });
+          worker.onmessage = (e: MessageEvent<WorkerResult & { id: number }>) => this.settle(e.data.id, e.data.ok ? e.data : null);
+          worker.onerror = () => {
+            for (const [id, p] of this.pending) if (p.worker === worker) this.settle(id, null);
+          };
+          this.workers.push(worker);
+        }
+        this.idle = [...this.workers];
+      } catch {
+        this.destroy();
+      }
+    }
+    this.size = this.workers.length;
+  }
+
+  private settle(id: number, result: WorkerResult | null) {
+    const p = this.pending.get(id);
+    if (!p) return;
+    this.pending.delete(id);
+    this.idle.push(p.worker);
+    p.resolve(result);
+  }
+
+  /** Callers keep at most `size` jobs in flight, so an idle worker always exists. */
+  run(message: Record<string, unknown>, transfer: ArrayBuffer[]): Promise<WorkerResult | null> {
+    const worker = this.idle.pop();
+    if (!worker) return Promise.resolve(null);
+    const id = this.nextId++;
+    return new Promise((resolve) => {
+      this.pending.set(id, { worker, resolve });
+      worker.postMessage({ ...message, id }, transfer);
+    });
+  }
+
+  destroy() {
+    this.workers.forEach((w) => w.terminate());
+    this.workers = [];
+    this.idle = [];
+    this.pending.forEach((p) => p.resolve(null));
+    this.pending.clear();
+  }
+}
+
+/**
+ * Concatenates a chunk's raw attribute and index data (a plain memcpy per mesh) into fresh buffers
+ * that can be transferred to a worker, which does the per-vertex transform. Returns null when the
+ * chunk isn't plain enough for that path (interleaved/morph/quantized/mismatched attributes) — the
+ * caller then falls back to merging it on the main thread, which handles every case.
+ */
+function buildWorkerPayload(meshes: THREE.Mesh[], rootInverse: THREE.Matrix4) {
+  const first = meshes[0].geometry;
+  const names = Object.keys(first.attributes);
+  const position = first.attributes.position;
+  if (!position || position.itemSize !== 3) return null;
+
+  const refs = names.map((name) => {
+    const a = first.attributes[name] as THREE.BufferAttribute;
+    return { name, itemSize: a.itemSize, normalized: a.normalized, ctor: a.array.constructor as any };
+  });
+  // The worker transforms these in place as floats.
+  if (refs.some((r) => (r.name === "position" || r.name === "normal" || r.name === "tangent") && r.ctor !== Float32Array)) return null;
+
+  let totalVertices = 0;
+  let totalIndices = 0;
+  for (const mesh of meshes) {
+    const g = mesh.geometry;
+    if (Object.keys(g.morphAttributes).length > 0) return null;
+    if (Object.keys(g.attributes).length !== refs.length) return null;
+    for (const r of refs) {
+      const a = g.attributes[r.name] as THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined;
+      if (!a || (a as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute) return null;
+      if (a.itemSize !== r.itemSize || a.normalized !== r.normalized || a.array.constructor !== r.ctor) return null;
+    }
+    const count = g.attributes.position.count;
+    totalVertices += count;
+    totalIndices += g.index ? g.index.count : count;
+  }
+
+  const attributes: WorkerAttribute[] = refs.map((r) => ({
+    name: r.name,
+    itemSize: r.itemSize,
+    normalized: r.normalized,
+    array: new r.ctor(totalVertices * r.itemSize),
+  }));
+  const rawIndex = new Uint32Array(totalIndices);
+  const items: { matrix: number[]; vertexStart: number; vertexCount: number; indexStart: number; indexCount: number; indexed: boolean }[] = [];
+
+  let v = 0;
+  let ix = 0;
+  const local = new THREE.Matrix4();
+  for (const mesh of meshes) {
+    const g = mesh.geometry;
+    const vertexCount = g.attributes.position.count;
+    attributes.forEach((out, k) => {
+      const src = (g.attributes[refs[k].name] as THREE.BufferAttribute).array as ArrayLike<number>;
+      out.array.set(src, v * out.itemSize);
+    });
+    const indexCount = g.index ? g.index.count : vertexCount;
+    if (g.index) rawIndex.set(g.index.array as ArrayLike<number>, ix);
+    local.multiplyMatrices(rootInverse, mesh.matrixWorld);
+    items.push({ matrix: local.toArray(), vertexStart: v, vertexCount, indexStart: ix, indexCount, indexed: !!g.index });
+    v += vertexCount;
+    ix += indexCount;
+  }
+
+  const transfer = [rawIndex.buffer as ArrayBuffer, ...attributes.map((a) => a.array.buffer as ArrayBuffer)];
+  return { message: { attributes, items, totalVertices, rawIndex }, transfer };
+}
+
 /**
  * Folds every eligible mesh sharing the same material into one big mesh per
  * material (BIM/CAD exports with no grouping can have tens of thousands of
@@ -213,9 +351,11 @@ function splitIntoSpatialChunks(meshes: THREE.Mesh[], rootInverse: THREE.Matrix4
  * visible until edgesOverlay.ts finishes building it (see there) — after
  * that it's masked the same way as everything else here.
  */
-export function mergeMeshesByMaterial(
-  root: THREE.Object3D
-): { batches: MergedBatch[]; meshToPart: Map<THREE.Mesh, { batch: MergedBatch; part: MergedPart }> } {
+export async function mergeMeshesByMaterial(
+  root: THREE.Object3D,
+  isCancelled: () => boolean = () => false,
+  onProgress?: (done: number, total: number) => void
+): Promise<{ batches: MergedBatch[]; meshToPart: Map<THREE.Mesh, { batch: MergedBatch; part: MergedPart }> } | null> {
   root.updateMatrixWorld(true);
   const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
 
@@ -234,13 +374,10 @@ export function mergeMeshesByMaterial(
     else groups.set(mesh.material, [mesh]);
   });
 
-  const batches: MergedBatch[] = [];
   const meshToPart = new Map<THREE.Mesh, { batch: MergedBatch; part: MergedPart }>();
 
-  const mergeChunk = (chunk: THREE.Mesh[], material: THREE.Material) => {
-    // Largest parts first, so a prefix of the index buffer is a cheap level of detail.
-    const meshes = sortLargestFirst(chunk, rootInverse);
-
+  /** Main-thread merge of one chunk: handles every attribute layout, but is the slow path. */
+  const mergeOnMainThread = (meshes: THREE.Mesh[]): { merged: THREE.BufferGeometry; pristine: Uint16Array | Uint32Array } | null => {
     const transformed = meshes.map((mesh) => {
       const local = new THREE.Matrix4().multiplyMatrices(rootInverse, mesh.matrixWorld);
       const geo = mesh.geometry.clone();
@@ -263,35 +400,49 @@ export function mergeMeshesByMaterial(
       // Incompatible attributes across this material's meshes — bail and
       // leave the originals as individual (unmerged) meshes.
       merged?.dispose();
-      return;
+      return null;
     }
     // mergeGeometries doesn't compute bounding volumes itself — do it now
     // instead of leaving frustum culling to compute it lazily on this
-    // batch's first render, and set frustumCulled explicitly so a merged
-    // batch is never accidentally exempted from it.
+    // batch's first render.
     merged.computeBoundingSphere();
     merged.computeBoundingBox();
-    // A merged batch can be a huge fraction of the whole model's triangles
-    // (BIM/CAD exports folded down to one draw call per material) — a plain
-    // per-triangle raycast (click-to-select, see ModelController.handleModelClick)
-    // against that would scan millions of triangles on every click. Building
-    // a bounds tree here (see bvhSetup.ts for the global raycast patch that
-    // uses it) turns that into a fast tree descent instead.
-    //
-    // `indirect: true` is required: by default computeBoundsTree() reorders
-    // geometry.index in place for cache locality (three-mesh-bvh's own
-    // documented behavior) — but `parts[].indexStart/indexCount` (just below)
-    // and pristineIndex are fixed offsets into that *same* index array,
-    // assumed stable everywhere a part is looked up by index range
-    // (findPartAtFaceIndex, setPartVisible, extractPartGeometry,
-    // extractPartIndexed). A silent reorder scrambles every one of those —
-    // hide/isolate mask the wrong triangles, the wrong part gets
-    // selected/highlighted, and per-part edges get built from the wrong
-    // triangle range. Indirect mode keeps its own internal ordering instead
-    // of touching geometry.index, so raycasts still resolve to the correct
-    // original faceIndex.
-    merged.computeBoundsTree({ indirect: true });
+    return { merged, pristine: (merged.index.array as Uint16Array | Uint32Array).slice() as Uint16Array | Uint32Array };
+  };
 
+  /** Builds the merged geometry for one chunk, in a worker when the chunk allows it. */
+  const mergeChunkGeometry = async (meshes: THREE.Mesh[]) => {
+    if (pool.size > 0) {
+      const payload = buildWorkerPayload(meshes, rootInverse);
+      if (payload) {
+        const res = await pool.run(payload.message, payload.transfer);
+        if (res) {
+          const merged = new THREE.BufferGeometry();
+          for (const a of res.attributes) {
+            merged.setAttribute(a.name, new THREE.BufferAttribute(a.array, a.itemSize, a.normalized));
+          }
+          merged.setIndex(new THREE.BufferAttribute(res.index, 1));
+          const [x0, y0, z0, x1, y1, z1] = res.box;
+          merged.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+          merged.boundingSphere = new THREE.Sphere(new THREE.Vector3(res.sphere[0], res.sphere[1], res.sphere[2]), res.sphere[3]);
+          return { merged, pristine: res.pristine };
+        }
+      }
+    }
+    return mergeOnMainThread(meshes);
+  };
+
+  /** Wraps a merged geometry in a mesh, records its parts, and swaps it in for the originals. */
+  const finishBatch = (
+    meshes: THREE.Mesh[],
+    material: THREE.Material,
+    { merged, pristine }: { merged: THREE.BufferGeometry; pristine: Uint16Array | Uint32Array }
+  ): MergedBatch => {
+    // The bounds tree that makes click-picking fast is NOT built here: building it for every chunk
+    // is a large synchronous cost. It is built lazily instead (see ensureBoundsTree, called from idle
+    // time after loading and again right before any raycast). Always `indirect: true`: the default
+    // reorders geometry.index in place, which would scramble every parts[].indexStart/indexCount
+    // lookup (hide/isolate, selection, per-part edges).
     const parts: MergedPart[] = [];
     let cursor = 0;
     meshes.forEach((mesh, i) => {
@@ -325,27 +476,68 @@ export function mergeMeshesByMaterial(
     mergedMesh.name = `Nhóm gộp (${meshes.length} bộ phận)`;
     root.add(mergedMesh);
 
-    const batch: MergedBatch = {
-      mesh: mergedMesh,
-      pristineIndex: (merged.index.array as Uint16Array | Uint32Array).slice() as Uint16Array | Uint32Array,
-      parts,
-      lodIndexCount,
-    };
+    const batch: MergedBatch = { mesh: mergedMesh, pristineIndex: pristine, parts, lodIndexCount };
     mergedMesh.userData.mergedBatch = batch;
-    batches.push(batch);
 
     meshes.forEach((mesh, i) => {
       meshToPart.set(mesh, { batch, part: parts[i] });
       mesh.parent?.remove(mesh);
       mesh.geometry.dispose();
     });
+    return batch;
   };
 
+  const jobs: { chunk: THREE.Mesh[]; material: THREE.Material }[] = [];
   groups.forEach((meshes, material) => {
     if (meshes.length < 2) return; // nothing to gain merging a single mesh
-    // Even a one-mesh chunk goes through here, so it still gets a bounds tree for fast picking.
-    splitIntoSpatialChunks(meshes, rootInverse).forEach((chunk) => mergeChunk(chunk, material));
+    splitIntoSpatialChunks(meshes, rootInverse).forEach((chunk) => jobs.push({ chunk, material }));
   });
+
+  // Chunks are merged by a pool of workers in parallel (each transforms and concatenates one chunk),
+  // with the cheap bookkeeping done here as results arrive. The main thread only memcpy's the raw
+  // data into the transfer buffers, so it stays free to render and handle input throughout.
+  const pool = new MergeWorkerPool();
+  const slots: (MergedBatch | undefined)[] = new Array(jobs.length);
+  const inFlight = new Set<Promise<void>>();
+  const limit = Math.max(1, pool.size);
+  let next = 0;
+  let done = 0;
+  let sliceStart = performance.now();
+  try {
+    while (next < jobs.length || inFlight.size > 0) {
+      if (isCancelled()) return null;
+      while (next < jobs.length && inFlight.size < limit) {
+        const index = next++;
+        const job = jobs[index];
+        // Largest parts first, so a prefix of the index buffer is a cheap level of detail.
+        const meshes = sortLargestFirst(job.chunk, rootInverse);
+        const task: Promise<void> = mergeChunkGeometry(meshes)
+          .then((result) => {
+            if (result && !isCancelled()) slots[index] = finishBatch(meshes, job.material, result);
+          })
+          .catch((err) => console.error("[merge] chunk failed, left unmerged:", err))
+          .finally(() => {
+            inFlight.delete(task);
+            onProgress?.(++done, jobs.length);
+          });
+        inFlight.add(task);
+      }
+      if (pool.size === 0) {
+        // No workers: chunks merge on this thread, so yield to the renderer once per time slice.
+        await Promise.all(inFlight);
+        if (performance.now() - sliceStart > MERGE_FRAME_BUDGET_MS) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          sliceStart = performance.now();
+        }
+      } else if (inFlight.size > 0) {
+        await Promise.race(inFlight);
+      }
+    }
+  } finally {
+    pool.destroy();
+  }
+  const batches = slots.filter((b): b is MergedBatch => !!b);
+  if (isCancelled()) return null;
 
   if (batches.length > 0) {
     const originalCount = batches.reduce((sum, b) => sum + b.parts.length, 0);
@@ -353,6 +545,12 @@ export function mergeMeshesByMaterial(
   }
 
   return { batches, meshToPart };
+}
+
+/** Builds the batch's raycast acceleration tree if it doesn't have one yet. */
+export function ensureBoundsTree(batch: MergedBatch) {
+  const geometry = batch.mesh.geometry;
+  if (!geometry.boundsTree) geometry.computeBoundsTree({ indirect: true });
 }
 
 /** Binary-searches which original part a raycast hit's faceIndex belongs to. */
@@ -478,11 +676,13 @@ export function extractPartIndexed(batch: MergedBatch, part: MergedPart): { posi
  * gets the same link stored on `mesh.userData.lineArtLinks` instead, for
  * SelectionController's non-merged hide/isolate/showAll path to apply.
  */
-export function mergeLineArtByMaterial(
+export async function mergeLineArtByMaterial(
   root: THREE.Object3D,
   lineArtToMesh: Map<LineArtObject, THREE.Mesh>,
-  meshToPart: Map<THREE.Mesh, { batch: MergedBatch; part: MergedPart }>
-): number {
+  meshToPart: Map<THREE.Mesh, { batch: MergedBatch; part: MergedPart }>,
+  isCancelled: () => boolean = () => false,
+  onProgress?: (done: number, total: number) => void
+): Promise<number> {
   root.updateMatrixWorld(true);
   const rootInverse = new THREE.Matrix4().copy(root.matrixWorld).invert();
 
@@ -501,8 +701,25 @@ export function mergeLineArtByMaterial(
 
   let mergedCount = 0;
 
+  // A whole model's line-art can share one material (tens of thousands of objects), so split each
+  // group into chunks and merge a few chunks per frame, like mergeMeshesByMaterial.
+  const jobs: { material: THREE.Material; kind: LineArtKind; objects: LineArtObject[] }[] = [];
   groups.forEach(({ material, kind, objects }) => {
-    if (objects.length < 2) return;
+    for (let i = 0; i < objects.length; i += LINE_ART_CHUNK_OBJECTS) {
+      jobs.push({ material, kind, objects: objects.slice(i, i + LINE_ART_CHUNK_OBJECTS) });
+    }
+  });
+
+  let sliceStart = performance.now();
+  let jobIndex = 0;
+  for (const { material, kind, objects } of jobs) {
+    if (isCancelled()) return mergedCount;
+    onProgress?.(jobIndex++, jobs.length);
+    if (performance.now() - sliceStart > MERGE_FRAME_BUDGET_MS) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      sliceStart = performance.now();
+    }
+    if (objects.length < 2) continue;
 
     const transformed = objects.map((o) => {
       const local = new THREE.Matrix4().multiplyMatrices(rootInverse, o.matrixWorld);
@@ -544,7 +761,7 @@ export function mergeLineArtByMaterial(
     transformed.forEach((g) => g.dispose());
     if (!merged || !merged.index) {
       merged?.dispose();
-      return; // incompatible attributes — leave these as individual objects
+      continue; // incompatible attributes — leave these as individual objects
     }
     // Same reasoning as mergeMeshesByMaterial: compute bounds eagerly and
     // make frustum culling explicit instead of implicit for this batch.
@@ -591,7 +808,7 @@ export function mergeLineArtByMaterial(
       o.parent?.remove(o);
       o.geometry.dispose();
     });
-  });
+  }
 
   return mergedCount;
 }

@@ -56,6 +56,9 @@ interface ViewerStore {
   setFileName: (name: string | null) => void;
   setStats: (stats: ModelStats | null) => void;
 
+  /** Overall progress of opening a model, 0..1 (null = nothing loading). */
+  loadProgress: number | null;
+  setLoadProgress: (p: number | null) => void;
   loading: boolean;
   loadingText: string;
   setLoading: (loading: boolean, text?: string) => void;
@@ -136,6 +139,8 @@ export const useViewerStore = create<ViewerStore>((set) => ({
   setFileName: (name) => set({ fileName: name, comments: [], activeCommentId: null, strokes: [] }),
   setStats: (stats) => set({ stats }),
 
+  loadProgress: null,
+  setLoadProgress: (loadProgress) => set({ loadProgress }),
   loading: false,
   loadingText: "",
   setLoading: (loading, text) => set({ loading, loadingText: text ?? "" }),

@@ -31,3 +31,15 @@ export const CUBE_NAV = {
 /** Hologram mode skips the edges overlay on models heavier than this. */
 export const HOLOGRAM_EDGES_MAX_TRIANGLES = 6_000_000;
 export const SELECTION_FILL_OPACITY = 0.2;
+
+/** Time spent merging meshes per frame before yielding, so a big model never freezes the tab. */
+export const MERGE_FRAME_BUDGET_MS = 10;
+
+/** Merged batches become visible (and are uploaded to the GPU) up to this many triangles per frame. */
+export const REVEAL_TRIANGLES_PER_FRAME = 600_000;
+
+/** Line-art objects folded into one merged object at a time, so a huge same-material group is merged in slices. */
+export const LINE_ART_CHUNK_OBJECTS = 1500;
+
+/** Upper bound on the number of workers used to merge meshes in parallel. */
+export const MERGE_WORKER_POOL_MAX = 8;

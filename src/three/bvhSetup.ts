@@ -15,9 +15,10 @@ import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from "three-
  * parts folded into a handful of merged-by-material batches (see
  * meshMerging.ts), each still tens of millions of triangles — a brute-force
  * scan of every batch's full triangle list on every click is slow enough to
- * feel laggy. `mergeMeshesByMaterial` builds the bounds tree for each merged
- * batch right after merging (see meshMerging.ts), which is what actually
- * benefits from this.
+ * feel laggy. The bounds tree for each merged batch is built lazily (see
+ * ensureBoundsTree in meshMerging.ts): in idle time after loading, and right
+ * before any raycast if it isn't there yet — building them all during the
+ * merge froze the tab on big models.
  */
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;

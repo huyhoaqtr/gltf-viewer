@@ -10,12 +10,15 @@ import { ModelBuilder } from "./modelBuilder";
 import { SelectionController } from "./selection";
 import { applyOrientation, type OrientationState } from "./orientation";
 import { applyMaterialStyle, computeStats, disposeObject3D } from "./modelStyling";
-import { mergeMeshesByMaterial, mergeLineArtByMaterial, findLineArtSiblings, type MergedBatch } from "./meshMerging";
+import { REVEAL_TRIANGLES_PER_FRAME } from "./constants";
+import { mergeMeshesByMaterial, mergeLineArtByMaterial, findLineArtSiblings, ensureBoundsTree, type MergedBatch } from "./meshMerging";
 import type { ModelStats, ViewerSettings } from "../types/viewer";
 
 export interface ModelControllerCallbacks {
   onStats: (stats: ModelStats | null) => void;
   onLoadingProgress: (loading: boolean, text?: string) => void;
+  /** Overall progress of opening a model (0..1), or null when idle. Only ever increases within one load. */
+  onProgress: (fraction: number | null) => void;
   onSelectionChange: (name: string | null) => void;
   onHiddenChange: (hasHidden: boolean) => void;
   onToast: (message: string) => void;
@@ -23,6 +26,17 @@ export interface ModelControllerCallbacks {
   /** Reports the framed model's bounds so the R3F scene can size ground/shadows/sun. */
   onFrame: (frame: FrameInfo) => void;
 }
+
+/** Where each loading stage ends on the overall 0..1 progress bar. */
+const PROGRESS = {
+  downloaded: 0.08,
+  parsed: 0.4,
+  styled: 0.42,
+  merged: 0.76,
+  lineArt: 0.84,
+  compiled: 0.87,
+  revealed: 0.94,
+} as const;
 
 export interface FrameInfo {
   radius: number;
@@ -45,6 +59,9 @@ export interface ModelControllerDeps {
   getSettings: () => ViewerSettings;
   /** Edges overlay on/off for the active view mode (see selectEdgesEnabled). */
   getEdgesEnabled: () => boolean;
+  /** Used to compile shaders asynchronously before the model is first drawn. */
+  getRenderer: () => THREE.WebGLRenderer;
+  getScene: () => THREE.Scene;
 }
 
 /**
@@ -141,61 +158,84 @@ export class ModelController {
   private loadGLTF(url: string, name: string) {
     this.callbacks.onLoadingProgress(true, "Đang tải model…");
     this.clearModel();
+    this.startProgress();
     this.gltfLoader.load(
       url,
       (gltf) => {
+        this.stopParseTimer();
+        this.reportProgress(PROGRESS.parsed);
         const root = gltf.scene || gltf.scenes[0];
         this.currentRoot = root;
-        // Attach the (still-empty, children detached below) root now so the
-        // scene graph / camera-framing math has a stable container from the
-        // start — parts get reparented into it progressively.
-        this.deps.pivot.add(root);
+        // The root stays OUT of the scene until it has been styled, merged and its shaders compiled.
+        // Drawing the raw model first meant uploading and rendering thousands of tiny meshes that
+        // are thrown away a moment later — the dominant cause of the tab freezing on big models.
+        // The full-screen spinner stays up meanwhile; it is hidden once the merged parts start showing.
+        this.callbacks.onLoadingProgress(true, "Đang xử lý model…");
 
         const stats = computeStats(root);
         this.callbacks.onStats(stats);
 
         this.callbacks.onFileName(name);
-        // Parsing is done — hide the full-screen spinner now and let the
-        // model stream into the viewport batch by batch instead of making
-        // the user wait for the whole thing to attach.
-        this.callbacks.onLoadingProgress(false);
         URL.revokeObjectURL(url);
 
-        let framedOnce = false;
         this.modelBuilder.build(
           root,
           this.styleOptions(),
-          () => {
-            // Rough frame as soon as the first batch is visible so the user
-            // isn't staring at an empty viewport; refined once loading finishes.
-            if (!framedOnce) {
-              framedOnce = true;
-              this.frameModel();
-            }
-          },
-          () => {
-            // Fold small same-material meshes into few big draw calls *before*
-            // framing/edges — ungrouped BIM/CAD exports can have tens of
-            // thousands of tiny separate meshes, and draw-call count (not
-            // triangle count) is what actually tanks frame rate for those.
-            // Record mesh↔line-art sibling pairs (see findLineArtSiblings)
-            // *before* merging removes the original mesh nodes — it's the
-            // only point where that sibling relationship is still visible —
-            // so mergeLineArtByMaterial can link each folded line-art's new
-            // slice back to the part it belongs to, for hide/isolate to mask
-            // together instead of leaving it stranded and still visible.
+          () => {},
+          async () => {
+            const cancelled = () => this.disposed || this.currentRoot !== root;
+            this.reportProgress(PROGRESS.styled);
+            // Fold small same-material meshes into few big draw calls — ungrouped BIM/CAD exports can
+            // have tens of thousands of tiny separate meshes, and draw-call count (not triangle count)
+            // is what actually tanks frame rate for those.
+            // Record mesh↔line-art sibling pairs (see findLineArtSiblings) *before* merging removes
+            // the original mesh nodes, so mergeLineArtByMaterial can link each folded line-art's new
+            // slice back to the part it belongs to, for hide/isolate to mask together.
             const lineArtToMesh = findLineArtSiblings(root);
-            const { batches, meshToPart } = mergeMeshesByMaterial(root);
+            // Time-sliced across frames (see mergeMeshesByMaterial) so the tab stays responsive.
+            const merged = await mergeMeshesByMaterial(root, cancelled, (done, total) =>
+              this.reportProgress(PROGRESS.styled + (PROGRESS.merged - PROGRESS.styled) * (done / total))
+            );
+            if (!merged || cancelled()) return; // another model was loaded (or the viewer closed) meanwhile
+            const { batches, meshToPart } = merged;
             this.mergedBatches = batches;
             this.selection.setMergedBatches(this.mergedBatches);
-            mergeLineArtByMaterial(root, lineArtToMesh, meshToPart);
+            await mergeLineArtByMaterial(root, lineArtToMesh, meshToPart, cancelled, (done, total) =>
+              this.reportProgress(PROGRESS.merged + (PROGRESS.lineArt - PROGRESS.merged) * (done / total))
+            );
+            this.reportProgress(PROGRESS.lineArt);
+            if (cancelled()) return;
+
+            // Compile the (few) final shader programs without blocking: the first draw would
+            // otherwise stall the main thread while the driver links them.
+            try {
+              await this.deps.getRenderer().compileAsync(root, this.deps.getCamera(), this.deps.getScene());
+            } catch {
+              /* compiling lazily on first draw still works */
+            }
+            if (cancelled()) return;
+            this.reportProgress(PROGRESS.compiled);
+
+            // Attach with the merged batches hidden, then reveal them a few at a time so their
+            // GPU upload is spread over many frames and the viewport stays interactive.
+            batches.forEach((batch) => (batch.mesh.visible = false));
+            this.deps.pivot.add(root);
             this.frameModel();
+            this.callbacks.onLoadingProgress(false);
+            await this.revealBatches(batches, cancelled);
+            if (cancelled()) return;
+            this.reportProgress(PROGRESS.revealed);
+
+            this.frameModel(); // refreshes the shadow map now that everything is visible
             if (this.deps.getEdgesEnabled()) {
               this.scheduleEdgesBuild(root);
+            } else {
+              this.finishProgress();
             }
             this.updateEdgeVisibility();
             this.setModelLinesVisible(this.deps.getSettings().showModelLines);
             this.ready = true;
+            this.scheduleBoundsTrees(root);
             this.hooks.afterMerge?.(root);
           }
         );
@@ -204,10 +244,13 @@ export class ModelController {
         if (evt.total) {
           const pct = Math.round((evt.loaded / evt.total) * 100);
           this.callbacks.onLoadingProgress(true, `Đang tải model… ${pct}%`);
+          this.reportProgress(PROGRESS.downloaded * (evt.loaded / evt.total));
         }
       },
       (err) => {
         console.error(err);
+        this.stopParseTimer();
+        this.callbacks.onProgress(null);
         this.callbacks.onLoadingProgress(false);
         this.callbacks.onToast("Không mở được file này. Hãy chắc chắn đó là .glb hoặc .gltf hợp lệ.");
         URL.revokeObjectURL(url);
@@ -216,6 +259,8 @@ export class ModelController {
   }
 
   private clearModel() {
+    this.stopParseTimer();
+    clearTimeout(this.progressHideTimer);
     this.selection.reset();
     this.edgesBuilder.cancel();
     this.modelBuilder.cancel();
@@ -279,6 +324,83 @@ export class ModelController {
     this.endInteraction();
   }
 
+  // ---------------------------------------------------------------------
+  // Overall load progress (0..1), shown as a bar at the top of the window
+  // ---------------------------------------------------------------------
+
+  private progress = 0;
+  private parseTimer: ReturnType<typeof setInterval> | undefined;
+  private progressHideTimer: ReturnType<typeof setTimeout> | undefined;
+
+  private startProgress() {
+    this.progress = 0;
+    this.callbacks.onProgress(0);
+    // Parsing reports no progress of its own, so ease toward the end of its share while it runs.
+    const started = performance.now();
+    this.parseTimer = setInterval(() => {
+      const t = (performance.now() - started) / 8000;
+      this.reportProgress(PROGRESS.downloaded + (PROGRESS.parsed - PROGRESS.downloaded) * (1 - Math.exp(-t)) * 0.95);
+    }, 250);
+  }
+
+  private stopParseTimer() {
+    clearInterval(this.parseTimer);
+    this.parseTimer = undefined;
+  }
+
+  private reportProgress(p: number) {
+    if (p <= this.progress) return;
+    this.progress = Math.min(p, 1);
+    this.callbacks.onProgress(this.progress);
+  }
+
+  /** Reaches 100%, then clears the bar shortly after so it can fade out. */
+  private finishProgress() {
+    this.reportProgress(1);
+    clearTimeout(this.progressHideTimer);
+    this.progressHideTimer = setTimeout(() => this.callbacks.onProgress(null), 700);
+  }
+
+  /** Makes merged batches visible a few frames at a time, bounded by triangles per frame. */
+  private async revealBatches(batches: MergedBatch[], cancelled: () => boolean) {
+    let budget = REVEAL_TRIANGLES_PER_FRAME;
+    let shown = 0;
+    for (const batch of batches) {
+      const triangles = batch.pristineIndex.length / 3;
+      if (budget < triangles && budget < REVEAL_TRIANGLES_PER_FRAME) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        if (cancelled()) return;
+        budget = REVEAL_TRIANGLES_PER_FRAME;
+      }
+      batch.mesh.visible = true;
+      budget -= triangles;
+      this.reportProgress(PROGRESS.compiled + (PROGRESS.revealed - PROGRESS.compiled) * (++shown / batches.length));
+    }
+  }
+
+  /** Builds the picking trees one batch at a time in idle periods (they are also built on demand before a pick). */
+  private scheduleBoundsTrees(root: THREE.Object3D) {
+    const queue = this.mergedBatches.filter((b) => !b.mesh.geometry.boundsTree);
+    const run = (deadline?: IdleDeadline) => {
+      if (this.currentRoot !== root) return;
+      do {
+        const batch = queue.shift();
+        if (!batch) return;
+        ensureBoundsTree(batch);
+      } while (queue.length > 0 && deadline && deadline.timeRemaining() > 8);
+      schedule();
+    };
+    const schedule = () => {
+      if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 2000 });
+      else setTimeout(() => run(), 50);
+    };
+    schedule();
+  }
+
+  private ensureAllBoundsTrees() {
+    for (const batch of this.mergedBatches) ensureBoundsTree(batch);
+  }
+
   // Starting the edges build right when a model finishes loading means its
   // main-thread work (reconstructing THREE.LineSegments from each worker
   // batch) directly competes with the browser's own first-render GPU upload
@@ -290,7 +412,16 @@ export class ModelController {
   private scheduleEdgesBuild(root: THREE.Object3D) {
     const start = () => {
       if (this.currentRoot !== root || !this.deps.getEdgesEnabled()) return; // model changed or toggled off meanwhile
-      this.edgesBuilder.build(root, () => this.updateEdgeVisibility(), this.deps.getSettings().edgeAngle);
+      this.edgesBuilder.build(
+        root,
+        () => {
+          this.updateEdgeVisibility();
+          if (this.currentRoot !== root) return;
+          this.reportProgress(PROGRESS.revealed + (1 - PROGRESS.revealed) * this.edgesBuilder.progress);
+          if (this.edgesBuilder.built) this.finishProgress();
+        },
+        this.deps.getSettings().edgeAngle
+      );
     };
     if (typeof requestIdleCallback === "function") {
       requestIdleCallback(start, { timeout: 1000 });
@@ -426,6 +557,7 @@ export class ModelController {
     this.raycaster.setFromCamera(ndc, this.deps.getCamera());
     // A click also fires the camera start/end events; picking must see every part, not just the LOD subset.
     this.applyInteractionLod(false);
+    this.ensureAllBoundsTrees();
     const hits = this.raycaster.intersectObject(this.currentRoot, true);
     this.selection.pickFromRaycast(hits);
   }
@@ -440,6 +572,7 @@ export class ModelController {
     );
     this.raycaster.setFromCamera(ndc, this.deps.getCamera());
     this.applyInteractionLod(false);
+    this.ensureAllBoundsTrees();
     const hit = this.raycaster.intersectObject(this.currentRoot, true)[0];
     if (!hit) return null;
     this.deps.pivot.updateMatrixWorld();

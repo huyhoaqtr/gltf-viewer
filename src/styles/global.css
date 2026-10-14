@@ -1180,3 +1180,26 @@ select {
   width: 22px;
   height: 22px;
 }
+
+/* Model load progress bar */
+#load-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+#load-progress.show {
+  opacity: 1;
+}
+.load-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(47, 143, 208, 0.6);
+  transform-origin: left center;
+  transition: transform 0.25s ease-out;
+}

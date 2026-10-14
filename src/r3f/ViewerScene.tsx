@@ -383,10 +383,13 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
         getControls: () => rt.controls,
         getSettings: () => s().settings,
         getEdgesEnabled: () => selectEdgesEnabled(s()),
+        getRenderer: () => store.getState().gl,
+        getScene: () => store.getState().scene,
       },
       {
         onStats: (stats) => s().setStats(stats),
         onLoadingProgress: (loading, text) => s().setLoading(loading, text),
+        onProgress: (p) => s().setLoadProgress(p),
         onSelectionChange: (name) => s().setSelectedName(name),
         onHiddenChange: (v) => s().setHasHidden(v),
         onToast: (msg) => s().showToast(msg),

@@ -9,6 +9,7 @@ import { useHologramHotkey } from "./hooks/useHologramHotkey";
 import { FpsPanel } from "./components/FpsPanel";
 import { Hint } from "./components/Hint";
 import { MarkupToolbar } from "./components/MarkupToolbar";
+import { LoadProgressBar } from "./components/LoadProgressBar";
 
 export default function App() {
   useHologramHotkey();
@@ -24,6 +25,7 @@ export default function App() {
       <FpsPanel />
       <Hint />
       <MarkupToolbar />
+      <LoadProgressBar />
     </>
   );
 }
