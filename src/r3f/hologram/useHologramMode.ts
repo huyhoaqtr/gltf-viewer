@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { createHologramDepthMaterial, createHologramMaterial } from "../../materials/HologramMaterial";
+import { createFlatHologramMaterial, createHologramDepthMaterial, createHologramMaterial } from "../../materials/HologramMaterial";
 import { HOLOGRAM_EDGES_MAX_TRIANGLES } from "../../three/constants";
 import { MaterialSwapper } from "../../three/hologramSwap";
 import { HOLOGRAM_COLORS } from "./palette";
@@ -22,15 +22,17 @@ export function useHologramMode() {
   const viewMode = useViewerStore((s) => s.viewMode);
   const material = useMemo(() => createHologramMaterial(), []);
   const depthMaterial = useMemo(() => createHologramDepthMaterial(), []);
-  const swapper = useMemo(() => new MaterialSwapper(material, depthMaterial), [material, depthMaterial]);
+  const flatMaterial = useMemo(() => createFlatHologramMaterial(material), [material]);
+  const swapper = useMemo(() => new MaterialSwapper(material, depthMaterial, flatMaterial), [material, depthMaterial, flatMaterial]);
   const prepass = useViewerStore((s) => s.hologramSettings.depthPrepass);
 
   useEffect(
     () => () => {
       material.dispose();
+      flatMaterial.dispose();
       depthMaterial.dispose();
     },
-    [material, depthMaterial]
+    [material, flatMaterial, depthMaterial]
   );
 
   // Follow the model's lifecycle: (re)apply once a new model is merged, and

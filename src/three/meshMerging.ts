@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { createFlatVariant } from "./modelStyling";
 import { INTERACTION_LOD_TRIANGLE_RATIO, MERGE_CHUNK_MAX_TRIANGLES, MERGE_FRAME_BUDGET_MS, LINE_ART_CHUNK_OBJECTS, MERGE_WORKER_POOL_MAX } from "./constants";
 
 type LineArtKind = "line" | "lineSegments" | "points";
@@ -201,13 +202,22 @@ interface WorkerAttribute {
   array: any;
 }
 
-interface WorkerResult {
-  ok: boolean;
+/** One geometry produced by the merge worker for (a subset of) a chunk's parts. */
+interface WorkerGroup {
+  /** "flat": position-only, welded, to be shaded with flatShading. "smooth": all original attributes. */
+  kind: "flat" | "smooth";
+  /** Which of the chunk's (largest-first) meshes this group holds, in index-buffer order. */
+  ordinals: number[];
   attributes: WorkerAttribute[];
   index: Uint16Array | Uint32Array;
   pristine: Uint16Array | Uint32Array;
   box: number[];
   sphere: number[];
+}
+
+interface WorkerResult {
+  ok: boolean;
+  groups: WorkerGroup[];
 }
 
 /** Small pool of workers that each transform + concatenate one chunk of meshes (see mergeWorker.ts). */
@@ -272,7 +282,7 @@ class MergeWorkerPool {
  * chunk isn't plain enough for that path (interleaved/morph/quantized/mismatched attributes) — the
  * caller then falls back to merging it on the main thread, which handles every case.
  */
-function buildWorkerPayload(meshes: THREE.Mesh[], rootInverse: THREE.Matrix4) {
+function buildWorkerPayload(meshes: THREE.Mesh[], rootInverse: THREE.Matrix4, material: THREE.Material) {
   const first = meshes[0].geometry;
   const names = Object.keys(first.attributes);
   const position = first.attributes.position;
@@ -329,7 +339,19 @@ function buildWorkerPayload(meshes: THREE.Mesh[], rootInverse: THREE.Matrix4) {
   }
 
   const transfer = [rawIndex.buffer as ArrayBuffer, ...attributes.map((a) => a.array.buffer as ArrayBuffer)];
-  return { message: { attributes, items, totalVertices, rawIndex }, transfer };
+  // Flat-shaded splitting needs plain position + normal data and a material that supports flatShading
+  // without maps that would need a tangent frame.
+  const std = material as THREE.MeshStandardMaterial;
+  const allowFlat =
+    refs.length === 2 &&
+    names.includes("position") &&
+    names.includes("normal") &&
+    !!std.isMeshStandardMaterial &&
+    !std.normalMap &&
+    !std.bumpMap &&
+    !std.displacementMap;
+
+  return { message: { attributes, items, totalVertices, rawIndex, allowFlat }, transfer };
 }
 
 /**
@@ -410,33 +432,48 @@ export async function mergeMeshesByMaterial(
     return { merged, pristine: (merged.index.array as Uint16Array | Uint32Array).slice() as Uint16Array | Uint32Array };
   };
 
-  /** Builds the merged geometry for one chunk, in a worker when the chunk allows it. */
-  const mergeChunkGeometry = async (meshes: THREE.Mesh[]) => {
+  /** Geometries for one chunk — from a worker when the chunk allows it, else merged here as one group. */
+  type ChunkGroup = { merged: THREE.BufferGeometry; pristine: Uint16Array | Uint32Array; ordinals: number[]; flat: boolean };
+  const mergeChunkGeometry = async (meshes: THREE.Mesh[], material: THREE.Material): Promise<ChunkGroup[] | null> => {
     if (pool.size > 0) {
-      const payload = buildWorkerPayload(meshes, rootInverse);
+      const payload = buildWorkerPayload(meshes, rootInverse, material);
       if (payload) {
         const res = await pool.run(payload.message, payload.transfer);
         if (res) {
-          const merged = new THREE.BufferGeometry();
-          for (const a of res.attributes) {
-            merged.setAttribute(a.name, new THREE.BufferAttribute(a.array, a.itemSize, a.normalized));
-          }
-          merged.setIndex(new THREE.BufferAttribute(res.index, 1));
-          const [x0, y0, z0, x1, y1, z1] = res.box;
-          merged.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
-          merged.boundingSphere = new THREE.Sphere(new THREE.Vector3(res.sphere[0], res.sphere[1], res.sphere[2]), res.sphere[3]);
-          return { merged, pristine: res.pristine };
+          return res.groups.map((g) => {
+            const merged = new THREE.BufferGeometry();
+            for (const a of g.attributes) {
+              merged.setAttribute(a.name, new THREE.BufferAttribute(a.array, a.itemSize, a.normalized));
+            }
+            merged.setIndex(new THREE.BufferAttribute(g.index, 1));
+            const [x0, y0, z0, x1, y1, z1] = g.box;
+            merged.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+            merged.boundingSphere = new THREE.Sphere(new THREE.Vector3(g.sphere[0], g.sphere[1], g.sphere[2]), g.sphere[3]);
+            return { merged, pristine: g.pristine, ordinals: g.ordinals, flat: g.kind === "flat" };
+          });
         }
       }
     }
-    return mergeOnMainThread(meshes);
+    const result = mergeOnMainThread(meshes);
+    return result ? [{ ...result, ordinals: meshes.map((_, i) => i), flat: false }] : null;
+  };
+
+  const flatVariants = new Map<THREE.Material, THREE.Material>();
+  const flatVariantOf = (material: THREE.Material) => {
+    let variant = flatVariants.get(material);
+    if (!variant) {
+      variant = createFlatVariant(material);
+      flatVariants.set(material, variant);
+    }
+    return variant;
   };
 
   /** Wraps a merged geometry in a mesh, records its parts, and swaps it in for the originals. */
   const finishBatch = (
     meshes: THREE.Mesh[],
     material: THREE.Material,
-    { merged, pristine }: { merged: THREE.BufferGeometry; pristine: Uint16Array | Uint32Array }
+    { merged, pristine }: { merged: THREE.BufferGeometry; pristine: Uint16Array | Uint32Array },
+    flat: boolean
   ): MergedBatch => {
     // The bounds tree that makes click-picking fast is NOT built here: building it for every chunk
     // is a large synchronous cost. It is built lazily instead (see ensureBoundsTree, called from idle
@@ -469,11 +506,13 @@ export async function mergeMeshesByMaterial(
       lodIndexCount = end;
     }
 
-    const mergedMesh = new THREE.Mesh(merged, material);
+    const mergedMesh = new THREE.Mesh(merged, flat ? flatVariantOf(material) : material);
     mergedMesh.castShadow = true;
     mergedMesh.receiveShadow = true;
     mergedMesh.frustumCulled = true;
     mergedMesh.name = `Nhóm gộp (${meshes.length} bộ phận)`;
+    // Read by the hologram swap, whose shader needs to know there is no normal attribute.
+    if (flat) mergedMesh.userData.flatShaded = true;
     root.add(mergedMesh);
 
     const batch: MergedBatch = { mesh: mergedMesh, pristineIndex: pristine, parts, lodIndexCount };
@@ -497,7 +536,7 @@ export async function mergeMeshesByMaterial(
   // with the cheap bookkeeping done here as results arrive. The main thread only memcpy's the raw
   // data into the transfer buffers, so it stays free to render and handle input throughout.
   const pool = new MergeWorkerPool();
-  const slots: (MergedBatch | undefined)[] = new Array(jobs.length);
+  const slots: MergedBatch[][] = new Array(jobs.length);
   const inFlight = new Set<Promise<void>>();
   const limit = Math.max(1, pool.size);
   let next = 0;
@@ -511,9 +550,17 @@ export async function mergeMeshesByMaterial(
         const job = jobs[index];
         // Largest parts first, so a prefix of the index buffer is a cheap level of detail.
         const meshes = sortLargestFirst(job.chunk, rootInverse);
-        const task: Promise<void> = mergeChunkGeometry(meshes)
-          .then((result) => {
-            if (result && !isCancelled()) slots[index] = finishBatch(meshes, job.material, result);
+        const task: Promise<void> = mergeChunkGeometry(meshes, job.material)
+          .then((groups) => {
+            if (!groups || isCancelled()) return;
+            slots[index] = groups.map((g) =>
+              finishBatch(
+                g.ordinals.map((o) => meshes[o]),
+                job.material,
+                g,
+                g.flat
+              )
+            );
           })
           .catch((err) => console.error("[merge] chunk failed, left unmerged:", err))
           .finally(() => {
@@ -536,7 +583,7 @@ export async function mergeMeshesByMaterial(
   } finally {
     pool.destroy();
   }
-  const batches = slots.filter((b): b is MergedBatch => !!b);
+  const batches = slots.flat().filter((b): b is MergedBatch => !!b);
   if (isCancelled()) return null;
 
   if (batches.length > 0) {

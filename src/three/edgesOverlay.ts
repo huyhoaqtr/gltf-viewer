@@ -299,7 +299,16 @@ export class EdgesOverlayBuilder {
     this.idleWorkers.delete(worker);
     const batch = this.currentBatches[this.currentNextBatchIndex++];
     const items = batch.map((j) => ({ id: j.id, position: j.position, index: j.index }));
-    worker.postMessage({ token: this.token, items, threshold: this.thresholdDeg });
+    // A batch part's arrays were freshly extracted for this job (extractPartIndexed), so they can be
+    // transferred instead of copied — halving peak memory on huge models. A plain mesh's arrays
+    // belong to its live geometry and must be copied.
+    const transfer: ArrayBuffer[] = [];
+    for (const j of batch) {
+      if (j.target.kind !== "batchPart") continue;
+      transfer.push(j.position.buffer as ArrayBuffer);
+      if (j.index) transfer.push(j.index.buffer as ArrayBuffer);
+    }
+    worker.postMessage({ token: this.token, items, threshold: this.thresholdDeg }, transfer);
   }
 
   private handleWorkerMessage(worker: Worker, e: MessageEvent<WorkerResponse>) {

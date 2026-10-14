@@ -8,14 +8,22 @@ const vertexShader = /* glsl */ `
 
   void main() {
     vec4 localPos = vec4(position, 1.0);
-    vec3 localNormal = normal;
+    #ifndef FLAT
+      vec3 localNormal = normal;
+    #endif
     #ifdef USE_INSTANCING
       localPos = instanceMatrix * localPos;
-      localNormal = mat3(instanceMatrix) * localNormal;
+      #ifndef FLAT
+        localNormal = mat3(instanceMatrix) * localNormal;
+      #endif
     #endif
     vec4 worldPos = modelMatrix * localPos;
     vWorldY = worldPos.y;
-    vNormal = normalize(mat3(modelMatrix) * localNormal);
+    #ifndef FLAT
+      vNormal = normalize(mat3(modelMatrix) * localNormal);
+    #else
+      vNormal = vec3(0.0, 0.0, 1.0);
+    #endif
     vViewDir = cameraPosition - worldPos.xyz;
     gl_Position = projectionMatrix * viewMatrix * worldPos;
   }
@@ -41,7 +49,13 @@ const fragmentShader = /* glsl */ `
     if (uReveal < 1.0 && vWorldY > mix(uBoundsY.x, uBoundsY.y, uReveal)) discard;
 
     // abs() so back faces (double-sided) glow the same as front faces.
-    float facing = abs(dot(normalize(vNormal), normalize(vViewDir)));
+    #ifdef FLAT
+      // Batches without a normal attribute (see mergeWorker.ts): the face normal from derivatives.
+      vec3 faceNormal = normalize(cross(dFdx(vViewDir), dFdy(vViewDir)));
+    #else
+      vec3 faceNormal = normalize(vNormal);
+    #endif
+    float facing = abs(dot(faceNormal, normalize(vViewDir)));
     float fresnel = pow(1.0 - clamp(facing, 0.0, 1.0), uRimPower);
 
     float scan = 0.5 + 0.5 * sin(vWorldY * uScanlineDensity - uTime * uScanlineSpeed * 6.2831853);
@@ -88,6 +102,17 @@ export function createHologramMaterial(): HologramMaterial {
   material.side = THREE.DoubleSide;
   material.fog = false;
   material.userData.isHologram = true;
+  return material;
+}
+
+/**
+ * Variant for meshes with no normal attribute (flat-shaded merged batches): same look, face
+ * normals from screen-space derivatives. Shares `source`'s uniforms, so updating one updates both.
+ */
+export function createFlatHologramMaterial(source: HologramMaterial): HologramMaterial {
+  const material = createHologramMaterial();
+  material.defines = { FLAT: "" };
+  material.uniforms = source.uniforms;
   return material;
 }
 

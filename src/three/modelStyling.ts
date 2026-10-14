@@ -37,6 +37,62 @@ function patchContrast(m: THREE.Material) {
   m.customProgramCacheKey = () => `${prevKey.call(m)}|contrast`;
 }
 
+/**
+ * Makes a flat-shaded variant of a material for merged batches that carry no normal attribute
+ * (see mergeWorker.ts): `flatShading` takes the normal from screen-space derivatives. three.js
+ * also offsets the shadow lookup along the *vertex* normal (`shadow.normalBias`) to avoid acne;
+ * with no vertex normal that offset moves to the fragment shader, where it uses the same
+ * (face) normal. The offset is linear in position, so the result is the same as the per-vertex one.
+ */
+export function createFlatVariant(source: THREE.Material): THREE.Material {
+  const m = source.clone() as THREE.MeshStandardMaterial;
+  m.flatShading = true;
+  m.userData.contrastPatched = false; // clone() copies userData but not onBeforeCompile
+  patchContrast(m);
+  patchFlatShadows(m);
+  m.userData.isFlatVariant = true;
+  m.needsUpdate = true;
+  return m;
+}
+
+function patchFlatShadows(m: THREE.Material) {
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, renderer) => {
+    prev?.call(m, shader, renderer);
+    const vertexOffset = "vec4( shadowWorldNormal * directionalLightShadows[ i ].shadowNormalBias, 0 )";
+    const fragmentLookup = "directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] )";
+    const vertexChunk = THREE.ShaderChunk.shadowmap_vertex;
+    const fragmentChunk = THREE.ShaderChunk.lights_fragment_begin;
+    if (!vertexChunk.includes(vertexOffset) || !fragmentChunk.includes(fragmentLookup)) {
+      console.warn("[flat shading] three.js shadow shader chunks changed; flat batches will use the unbiased shadow lookup");
+      return;
+    }
+    shader.vertexShader = shader.vertexShader.replace(
+      "#include <shadowmap_vertex>",
+      vertexChunk.replace(vertexOffset, "vec4( 0.0 )")
+    );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <shadowmap_pars_fragment>",
+        `#include <shadowmap_pars_fragment>
+#if defined( USE_SHADOWMAP ) && NUM_DIR_LIGHT_SHADOWS > 0
+	uniform mat4 directionalShadowMatrix[ NUM_DIR_LIGHT_SHADOWS ];
+#endif`
+      )
+      .replace(
+        "#include <lights_fragment_begin>",
+        `vec3 flatShadowNormal = inverseTransformDirection( normal * faceDirection, viewMatrix );
+` +
+          fragmentChunk.replace(
+            fragmentLookup,
+            "directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] + directionalShadowMatrix[ i ] * vec4( flatShadowNormal * directionalLightShadow.shadowNormalBias, 0.0 ) )"
+          )
+      );
+  };
+  const prevKey = m.customProgramCacheKey;
+  m.customProgramCacheKey = () => `${prevKey.call(m)}|flatshadow`;
+}
+
 export interface MaterialStyleOptions {
   flattenMetal: boolean;
   doubleSided: boolean;

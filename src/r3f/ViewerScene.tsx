@@ -514,17 +514,19 @@ function DebugHandle() {
   const rt = useSceneRuntime();
   const gl = useThree((s) => s.gl);
   const scene = useThree((s) => s.scene);
+  const store = useStore();
   useEffect(() => {
     const w = window as unknown as { __viewer?: unknown };
     w.__viewer = {
       gl,
       scene,
+      camera: () => store.getState().camera,
       info: () => ({ memory: { ...gl.info.memory }, render: { ...rt.mainRender } }),
     };
     return () => {
       delete w.__viewer;
     };
-  }, [gl, scene, rt]);
+  }, [gl, scene, rt, store]);
   return null;
 }
 

@@ -22,7 +22,9 @@ export class MaterialSwapper {
 
   constructor(
     private override: THREE.Material,
-    private depthMaterial: THREE.Material
+    private depthMaterial: THREE.Material,
+    /** For meshes flagged `userData.flatShaded` (no normal attribute). */
+    private flatOverride: THREE.Material = override
   ) {}
 
   /** Idempotent: meshes that are already swapped are left alone. */
@@ -34,7 +36,8 @@ export class MaterialSwapper {
       if (mesh.morphTargetInfluences?.length) return;
       if (this.swapped.has(mesh)) return;
       this.originals.set(mesh, mesh.material);
-      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(() => this.override) : this.override;
+      const override = mesh.userData.flatShaded ? this.flatOverride : this.override;
+      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(() => override) : override;
       this.swapped.add(mesh);
       if (prepass && !mesh.isInstancedMesh) this.prepassMeshes.set(mesh, this.makePrepass(mesh));
     });
