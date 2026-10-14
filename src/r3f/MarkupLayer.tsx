@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore, useThree } from "@react-three/fiber";
-import { Line } from "@react-three/drei";
+import { Html, Line } from "@react-three/drei";
 import * as THREE from "three";
 import { useViewerStore } from "../state/viewerStore";
 import type { MarkupTool } from "../types/viewer";
@@ -10,6 +10,11 @@ type Pts = [number, number, number][];
 
 const CIRCLE_SEGMENTS = 64;
 const PEN_MIN_PX = 2;
+/** The text box stops growing at this many characters (longer text scrolls inside it). */
+const TEXT_MAX_CHARS = 28;
+
+/** Label font size in px for a given line-width setting (1–12 → 11–22px). */
+const textSize = (width: number) => Math.round(10 + width * 1);
 
 /**
  * Shapes drawn on a plane through the first clicked surface point, facing the camera
@@ -28,6 +33,7 @@ export function MarkupLayer() {
   const color = useViewerStore((s) => s.markupColor);
   const width = useViewerStore((s) => s.markupWidth);
   const [draft, setDraft] = useState<Pts | null>(null);
+  const [textDraft, setTextDraft] = useState<[number, number, number] | null>(null);
 
   useEffect(() => {
     if (tool === "off") return;
@@ -138,6 +144,16 @@ export function MarkupLayer() {
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0 || drawing) return;
       const camera = store.getState().camera;
+      if (tool === "text") {
+        // Label sits on the model surface under the click (or at the orbit target over empty space).
+        const hit = rt.controller?.pickLocalPoint(e.clientX, e.clientY, dom);
+        if (hit) return setTextDraft([hit.x, hit.y, hit.z]);
+        const normal = camera.getWorldDirection(new THREE.Vector3());
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, rt.controls?.target ?? new THREE.Vector3());
+        const p = planePoint(e.clientX, e.clientY, plane);
+        if (p) setTextDraft(toLocal(p));
+        return;
+      }
       const local = rt.controller?.pickLocalPoint(e.clientX, e.clientY, dom);
       const anchor = local
         ? group.localToWorld(local.clone())
@@ -216,6 +232,7 @@ export function MarkupLayer() {
       } else if (e.key === "Escape") {
         drawing = null;
         setDraft(null);
+        setTextDraft(null);
         useViewerStore.getState().setMarkupTool("off");
       }
     };
@@ -230,12 +247,20 @@ export function MarkupLayer() {
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("keydown", onKey);
       setDraft(null);
+      setTextDraft(null);
     };
   }, [tool, gl, rt, store]);
 
   return (
     <group ref={groupRef}>
-      {strokes.map((s) => (
+      {strokes.map((s) =>
+        s.text ? (
+          <Html key={s.id} position={s.points[0]} center zIndexRange={[20, 10]}>
+            <div className="markup-text" style={{ color: s.color, fontSize: textSize(s.width) }}>
+              {s.text}
+            </div>
+          </Html>
+        ) : (
         <Line
           key={s.id}
           points={s.points}
@@ -245,7 +270,32 @@ export function MarkupLayer() {
           transparent
           renderOrder={999}
         />
-      ))}
+        )
+      )}
+      {textDraft && (
+        <Html position={textDraft} center zIndexRange={[30, 20]}>
+          <input
+            className="markup-text-input"
+            autoFocus
+            size={8}
+            maxLength={200}
+            onInput={(e) => (e.currentTarget.size = Math.min(TEXT_MAX_CHARS, Math.max(8, e.currentTarget.value.length + 1)))}
+            style={{ color, fontSize: textSize(width) }}
+            placeholder="Nhập chữ…"
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Escape") setTextDraft(null);
+              else if (e.key === "Enter") e.currentTarget.blur();
+            }}
+            onBlur={(e) => {
+              const text = e.currentTarget.value.trim();
+              setTextDraft(null);
+              if (text) useViewerStore.getState().addStroke({ color, width, points: [textDraft], text });
+            }}
+          />
+        </Html>
+      )}
       {draft && draft.length >= 2 && (
         <Line points={draft} color={color} lineWidth={width} depthTest={false} transparent renderOrder={999} />
       )}

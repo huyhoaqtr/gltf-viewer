@@ -1039,3 +1039,82 @@ select {
 #viewport.drawing canvas {
   cursor: crosshair !important;
 }
+
+.markup-text,
+.markup-text-input {
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-shadow: 0 0 3px rgba(255, 255, 255, 0.5), 0 0 3px rgba(255, 255, 255, 0.5), 0 0 2px rgba(255, 255, 255, 0.5);
+}
+.markup-text {
+  width: max-content;
+  max-width: 260px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+}
+.markup-text-input {
+  box-sizing: content-box;
+  padding: 1px 4px;
+  border: 1px dashed currentColor;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.85);
+  outline: none;
+}
+
+.markup-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid rgba(15, 23, 42, 0.25);
+  cursor: pointer;
+}
+.markup-swatch[aria-pressed="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.markup-text-input::placeholder {
+  font-weight: 400;
+  opacity: 0.55;
+}
+
+.markup-text-input {
+  max-width: 260px;
+}
+
+.markup-colormenu {
+  position: relative;
+}
+.markup-toolbar .markup-colorbtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.markup-colorbtn .icon {
+  width: 14px;
+  height: 14px;
+}
+.markup-popover {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 14px);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(5, 22px);
+  gap: 8px;
+  align-items: center;
+  padding: 10px;
+  background: var(--panel);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+.markup-popover .markup-color {
+  width: 22px;
+  height: 22px;
+}

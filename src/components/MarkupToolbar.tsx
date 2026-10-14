@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { useViewerStore } from "../state/viewerStore";
 import type { MarkupTool } from "../types/viewer";
 
@@ -6,8 +7,68 @@ const TOOLS: { id: Exclude<MarkupTool, "off">; label: string; path: string }[] =
   { id: "line", label: "Đường thẳng", path: "M5 19L19 5" },
   { id: "arrow", label: "Mũi tên", path: "M5 19L19 5M10 5h9v9" },
   { id: "rect", label: "Chữ nhật", path: "M4 6h16v12H4z" },
+  { id: "text", label: "Chữ", path: "M5 7V5h14v2M12 5v14M9 19h6" },
   { id: "circle", label: "Hình tròn", path: "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z" },
 ];
+
+const SWATCHES = ["#e0435a", "#f59e0b", "#facc15", "#22c55e", "#2f8fd0", "#8b5cf6", "#111827", "#ffffff"];
+
+/** Colour button that opens a popover with the preset swatches and a custom picker. */
+function ColorMenu({ color, onChange }: { color: string; onChange: (c: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  return (
+    <div className="markup-colormenu" ref={ref}>
+      <button
+        type="button"
+        className="btn markup-colorbtn"
+        aria-haspopup="true"
+        aria-expanded={open}
+        title="Màu"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="markup-swatch" style={{ background: color }} />
+        <ToolIcon path="m6 9 6 6 6-6" />
+      </button>
+      {open && (
+        <div className="markup-popover">
+          {SWATCHES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className="markup-swatch"
+              style={{ background: c }}
+              aria-pressed={color.toLowerCase() === c}
+              aria-label={`Màu ${c}`}
+              title={c}
+              onClick={() => {
+                onChange(c);
+                setOpen(false);
+              }}
+            />
+          ))}
+          <input
+            type="color"
+            className="markup-color"
+            title="Màu tùy chọn"
+            value={color}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ToolIcon({ path }: { path: string }) {
   return (
@@ -41,7 +102,7 @@ export function MarkupToolbar() {
         </button>
       ))}
       <span className="toolbar-divider" />
-      <input type="color" className="markup-color" title="Màu" value={color} onChange={(e) => setMarkupColor(e.target.value)} />
+      <ColorMenu color={color} onChange={setMarkupColor} />
       <input
         type="range"
         className="markup-width"
@@ -62,7 +123,6 @@ export function MarkupToolbar() {
       <button type="button" className="btn primary" title="Xong (Esc)" aria-label="Xong" onClick={() => setMarkupTool("off")}>
         <ToolIcon path="m5 12 5 5 9-10" />
       </button>
-      <span className="markup-hint">Chuột phải: xoay · Lăn: zoom</span>
     </div>
   );
 }

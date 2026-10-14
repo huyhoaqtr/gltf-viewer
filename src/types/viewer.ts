@@ -113,7 +113,7 @@ export interface Comment {
   text: string;
 }
 
-export type MarkupTool = "off" | "pen" | "line" | "arrow" | "rect" | "circle";
+export type MarkupTool = "off" | "pen" | "line" | "arrow" | "rect" | "circle" | "text";
 
 /** A shape drawn over the model; points are a polyline in the model pivot's local space. */
 export interface MarkupStroke {
@@ -121,4 +121,6 @@ export interface MarkupStroke {
   color: string;
   width: number;
   points: [number, number, number][];
+  /** Set for a text label: anchored at points[0]; `width` scales the font. */
+  text?: string;
 }
