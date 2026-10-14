@@ -15,6 +15,8 @@ import { HologramEffects } from "./hologram/HologramEffects";
 import { HOLOGRAM_COLORS } from "./hologram/palette";
 import { useHologramMode } from "./hologram/useHologramMode";
 import { FpsMeter } from "./FpsMeter";
+import { CommentLayer } from "./CommentLayer";
+import { MarkupLayer } from "./MarkupLayer";
 import { registerCubeApi } from "./cubeApi";
 import { registerViewerApi } from "./viewerApi";
 import { SceneRuntimeContext, useSceneRuntime, type SceneRuntime } from "./runtime";
@@ -282,6 +284,16 @@ function Controls() {
     };
   }, [controls, rt]);
 
+  // While a markup tool is active the left button draws; orbit moves to the right button.
+  const markupActive = useViewerStore((s) => s.markupTool !== "off");
+  useEffect(() => {
+    if (!controls) return;
+    const none = -1 as THREE.MOUSE;
+    controls.mouseButtons.LEFT = markupActive ? none : THREE.MOUSE.ROTATE;
+    controls.mouseButtons.RIGHT = markupActive ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
+    controls.touches.ONE = markupActive ? (-1 as THREE.TOUCH) : THREE.TOUCH.ROTATE;
+  }, [controls, markupActive]);
+
   useFrame(() => {
     if (controls) controls.autoRotate = useViewerStore.getState().settings.autoRotate;
   });
@@ -405,10 +417,22 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
       if (!down) return;
       const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
       down = null;
-      if (moved <= 6) controller.handleModelClick(e.clientX, e.clientY, dom);
+      if (moved > 6 || useViewerStore.getState().markupTool !== "off") return;
+      const state = useViewerStore.getState();
+      if (state.commentMode) {
+        const p = controller.pickLocalPoint(e.clientX, e.clientY, dom);
+        if (p) state.addComment([p.x, p.y, p.z]);
+        else state.setActiveComment(null);
+      } else {
+        controller.handleModelClick(e.clientX, e.clientY, dom);
+      }
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") controller.clearSelection();
+      if (e.key !== "Escape") return;
+      controller.clearSelection();
+      const state = useViewerStore.getState();
+      if (state.commentMode) state.toggleCommentMode();
+      state.setActiveComment(null);
     };
     dom.addEventListener("pointerdown", onPointerDown);
     dom.addEventListener("pointerup", onPointerUp);
@@ -468,7 +492,12 @@ function ModelLayer({ onFrame }: { onFrame: (frame: FrameInfo) => void }) {
     return () => clearTimeout(id);
   }, [rt, edgeAngle]);
 
-  return <group ref={pivotRef} />;
+  return (
+    <group ref={pivotRef}>
+      <CommentLayer />
+      <MarkupLayer />
+    </group>
+  );
 }
 
 /** Fog, grid and post-processing: mounted only while in hologram mode. */

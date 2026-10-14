@@ -9,12 +9,15 @@ import { BackgroundSection } from "./BackgroundSection";
 import { CameraSection } from "./CameraSection";
 import { HologramSection } from "./HologramSection";
 
-type Tab = "scene" | "model" | "select";
+import { CommentSection } from "./CommentSection";
+
+type Tab = "scene" | "model" | "select" | "comment";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "scene", label: "Cảnh" },
   { id: "model", label: "Model" },
   { id: "select", label: "Chọn" },
+  { id: "comment", label: "Comment" },
 ];
 
 export function ControlPanel() {
@@ -40,6 +43,7 @@ export function ControlPanel() {
       </>
     ),
     select: <SelectionSection />,
+    comment: <CommentSection />,
   };
 
   return (

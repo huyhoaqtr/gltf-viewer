@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { viewerApi } from "../r3f/viewerApi";
 import { useViewerStore } from "../state/viewerStore";
 import { formatCount } from "../utils/format";
-import { IconFit, IconHologram, IconOpen, IconPanel } from "./Icons";
+import { IconFit, IconHologram, IconComment, IconMarkup, IconOpen, IconPanel } from "./Icons";
 
 export function TopBar() {
   const fileName = useViewerStore((s) => s.fileName);
@@ -11,6 +11,10 @@ export function TopBar() {
   const togglePanel = useViewerStore((s) => s.togglePanel);
   const viewMode = useViewerStore((s) => s.viewMode);
   const toggleHologram = useViewerStore((s) => s.toggleHologram);
+  const commentMode = useViewerStore((s) => s.commentMode);
+  const toggleCommentMode = useViewerStore((s) => s.toggleCommentMode);
+  const markupTool = useViewerStore((s) => s.markupTool);
+  const setMarkupTool = useViewerStore((s) => s.setMarkupTool);
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -50,6 +54,26 @@ export function TopBar() {
         >
           <IconHologram />
           <span className="label">Hologram</span>
+        </button>
+        <button
+          className="btn toggle"
+          disabled={!fileName}
+          aria-pressed={commentMode}
+          title="Comment: click lên model để ghim ghi chú"
+          onClick={toggleCommentMode}
+        >
+          <IconComment />
+          <span className="label">Comment</span>
+        </button>
+        <button
+          className="btn toggle"
+          disabled={!fileName}
+          aria-pressed={markupTool !== "off"}
+          title="Markup: vẽ bút, đường, hình chữ nhật, hình tròn lên model"
+          onClick={() => setMarkupTool(markupTool === "off" ? "pen" : "off")}
+        >
+          <IconMarkup />
+          <span className="label">Markup</span>
         </button>
         <span className="toolbar-divider" />
         <button className="btn toggle" aria-pressed={panelOpen} title="Bảng điều khiển" onClick={togglePanel}>

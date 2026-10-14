@@ -429,4 +429,20 @@ export class ModelController {
     const hits = this.raycaster.intersectObject(this.currentRoot, true);
     this.selection.pickFromRaycast(hits);
   }
+
+  /** Surface point under the cursor, in the pivot's local space (so it follows orientation changes). */
+  pickLocalPoint(clientX: number, clientY: number, dom: HTMLElement): THREE.Vector3 | null {
+    if (!this.currentRoot) return null;
+    const rect = dom.getBoundingClientRect();
+    const ndc = new THREE.Vector2(
+      ((clientX - rect.left) / rect.width) * 2 - 1,
+      -((clientY - rect.top) / rect.height) * 2 + 1
+    );
+    this.raycaster.setFromCamera(ndc, this.deps.getCamera());
+    this.applyInteractionLod(false);
+    const hit = this.raycaster.intersectObject(this.currentRoot, true)[0];
+    if (!hit) return null;
+    this.deps.pivot.updateMatrixWorld();
+    return this.deps.pivot.worldToLocal(hit.point.clone());
+  }
 }

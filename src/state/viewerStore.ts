@@ -4,6 +4,9 @@ import {
   DEFAULT_HOLOGRAM_SETTINGS,
   DEFAULT_SETTINGS,
   type HologramSettings,
+  type Comment,
+  type MarkupStroke,
+  type MarkupTool,
   type ModelStats,
   type ViewMode,
   type ViewerSettings,
@@ -67,6 +70,29 @@ interface ViewerStore {
   hasHidden: boolean;
   setHasHidden: (v: boolean) => void;
 
+  /** Comment pins: positions are in the model pivot's local space. */
+  comments: Comment[];
+  commentMode: boolean;
+  activeCommentId: number | null;
+  toggleCommentMode: () => void;
+  addComment: (position: [number, number, number]) => void;
+  updateComment: (id: number, text: string) => void;
+  removeComment: (id: number) => void;
+  clearComments: () => void;
+  setActiveComment: (id: number | null) => void;
+
+  /** Markup drawing: while a tool is active the left button draws and the right button orbits. */
+  markupTool: MarkupTool;
+  markupColor: string;
+  markupWidth: number;
+  strokes: MarkupStroke[];
+  setMarkupTool: (tool: MarkupTool) => void;
+  setMarkupColor: (color: string) => void;
+  setMarkupWidth: (width: number) => void;
+  addStroke: (stroke: Omit<MarkupStroke, "id">) => void;
+  undoStroke: () => void;
+  clearStrokes: () => void;
+
   dropzoneVisible: boolean;
   setDropzoneVisible: (v: boolean) => void;
   dragOver: boolean;
@@ -106,7 +132,8 @@ export const useViewerStore = create<ViewerStore>((set) => ({
 
   fileName: null,
   stats: null,
-  setFileName: (name) => set({ fileName: name }),
+  // A new model invalidates the pins placed on the previous one.
+  setFileName: (name) => set({ fileName: name, comments: [], activeCommentId: null, strokes: [] }),
   setStats: (stats) => set({ stats }),
 
   loading: false,
@@ -122,6 +149,38 @@ export const useViewerStore = create<ViewerStore>((set) => ({
 
   hasHidden: false,
   setHasHidden: (v) => set({ hasHidden: v }),
+
+  comments: [],
+  commentMode: false,
+  activeCommentId: null,
+  toggleCommentMode: () =>
+    set((s) => ({ commentMode: !s.commentMode, markupTool: s.commentMode ? s.markupTool : "off" })),
+  addComment: (position) =>
+    set((s) => {
+      const id = s.comments.reduce((m, k) => Math.max(m, k.id), 0) + 1;
+      return { comments: [...s.comments, { id, position, text: "" }], activeCommentId: id };
+    }),
+  updateComment: (id, text) => set((s) => ({ comments: s.comments.map((k) => (k.id === id ? { ...k, text } : k)) })),
+  removeComment: (id) =>
+    set((s) => ({
+      comments: s.comments.filter((k) => k.id !== id),
+      activeCommentId: s.activeCommentId === id ? null : s.activeCommentId,
+    })),
+  clearComments: () => set({ comments: [], activeCommentId: null }),
+  setActiveComment: (id) => set({ activeCommentId: id }),
+
+  markupTool: "off",
+  markupColor: "#e0435a",
+  markupWidth: 3,
+  strokes: [],
+  // Comment pins and drawing both own the left button, so only one is active at a time.
+  setMarkupTool: (markupTool) => set((s) => ({ markupTool, commentMode: markupTool === "off" ? s.commentMode : false })),
+  setMarkupColor: (markupColor) => set({ markupColor }),
+  setMarkupWidth: (markupWidth) => set({ markupWidth }),
+  addStroke: (stroke) =>
+    set((s) => ({ strokes: [...s.strokes, { ...stroke, id: s.strokes.reduce((m, k) => Math.max(m, k.id), 0) + 1 }] })),
+  undoStroke: () => set((s) => ({ strokes: s.strokes.slice(0, -1) })),
+  clearStrokes: () => set({ strokes: [] }),
 
   dropzoneVisible: true,
   setDropzoneVisible: (v) => set({ dropzoneVisible: v }),

@@ -39,6 +39,17 @@ export const IconPanel = () => (
     <path d="M15 4v16" />
   </Icon>
 );
+export const IconComment = () => (
+  <Icon>
+    <path d="M12 21s-6-5.4-6-10a6 6 0 0 1 12 0c0 4.6-6 10-6 10z" />
+    <circle cx="12" cy="11" r="2" />
+  </Icon>
+);
+export const IconMarkup = () => (
+  <Icon>
+    <path d="M4 20l4-1L19 8l-3-3L5 16zM14 7l3 3" />
+  </Icon>
+);
 export const IconChevron = () => (
   <Icon>
     <path d="m6 9 6 6 6-6" />

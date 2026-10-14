@@ -105,3 +105,20 @@ export const BACKGROUND_LABELS: Record<string, string> = {
   "#191b1f": "Đen studio",
   "#ffffff": "Trắng",
 };
+
+/** A note pinned to a point on the model surface (position is in the model pivot's local space). */
+export interface Comment {
+  id: number;
+  position: [number, number, number];
+  text: string;
+}
+
+export type MarkupTool = "off" | "pen" | "line" | "arrow" | "rect" | "circle";
+
+/** A shape drawn over the model; points are a polyline in the model pivot's local space. */
+export interface MarkupStroke {
+  id: number;
+  color: string;
+  width: number;
+  points: [number, number, number][];
+}

@@ -861,3 +861,181 @@ select {
     display: none;
   }
 }
+
+/* Comment pins */
+#viewport.comment-mode canvas {
+  cursor: crosshair !important;
+}
+.comment-pin {
+  position: relative;
+  font-size: 12px;
+}
+.comment-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.35);
+}
+.comment-dot.sm {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  cursor: inherit;
+  box-shadow: none;
+}
+.comment-pin.active .comment-dot {
+  background: var(--danger);
+}
+.comment-label,
+.comment-bubble {
+  position: absolute;
+  left: 30px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+.comment-label {
+  max-width: 180px;
+  padding: 5px 9px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+}
+.comment-bubble {
+  width: 210px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.comment-bubble textarea {
+  width: 100%;
+  resize: none;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+}
+.comment-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.btn.danger {
+  color: var(--danger);
+}
+.btn.toggle[aria-pressed="true"] {
+  background: var(--accent-dim);
+  color: #0d5c8c;
+}
+.comment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.comment-list li {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.comment-list li.active {
+  border-color: var(--accent);
+}
+.comment-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+.comment-item-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.comment-del {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.comment-del:hover {
+  color: var(--danger);
+}
+
+/* Markup drawing toolbar */
+.markup-toolbar {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: var(--panel);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+.markup-toolbar .btn {
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  padding: 7px 10px;
+}
+.markup-toolbar .btn:hover:not(:disabled) {
+  background: var(--panel-2);
+}
+.markup-toolbar .btn.primary {
+  background: var(--accent);
+  color: #fff;
+}
+.markup-color {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.markup-width {
+  width: 80px;
+}
+.markup-hint {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+#viewport.drawing canvas {
+  cursor: crosshair !important;
+}

@@ -8,6 +8,7 @@ import { ToastBanner } from "./components/ToastBanner";
 import { useHologramHotkey } from "./hooks/useHologramHotkey";
 import { FpsPanel } from "./components/FpsPanel";
 import { Hint } from "./components/Hint";
+import { MarkupToolbar } from "./components/MarkupToolbar";
 
 export default function App() {
   useHologramHotkey();
@@ -22,6 +23,7 @@ export default function App() {
       <ToastBanner />
       <FpsPanel />
       <Hint />
+      <MarkupToolbar />
     </>
   );
 }
